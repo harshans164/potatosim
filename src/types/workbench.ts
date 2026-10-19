@@ -47,4 +47,5 @@ export interface ContextMenuState {
   blockId: string;
   x: number;
   y: number;
+  rowIndex?: number;
 }

@@ -6,7 +6,7 @@ interface Props {
   selected: boolean;
   onSelect: (id: string) => void;
   onMoveStart: (event: React.PointerEvent, block: CanvasBlock) => void;
-  onContextMenu: (event: React.MouseEvent, id: string) => void;
+  onContextMenu: (event: React.MouseEvent, id: string, rowIndex?: number) => void;
 }
 
 export function SystemBlock({ block, selected, onSelect, onMoveStart, onContextMenu }: Props) {
@@ -38,7 +38,7 @@ export function SystemBlock({ block, selected, onSelect, onMoveStart, onContextM
       {block.notes && <div className="component-note" title={block.notes}>{block.notes}</div>}
       <div className="component-widget" onPointerDown={event => onMoveStart(event, block)}>
         <div className="component-letterbar"><span>▾</span><strong>{systemLabel}</strong></div>
-        {componentRows.map((row, index) => <div className={`component-row ${index === 0 ? "primary" : ""}`} key={`${block.id}-${index}-${row}`}>
+        {componentRows.map((row, index) => <div className={`component-row ${index === 0 ? "primary" : ""}`} key={`${block.id}-${index}-${row}`} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); onContextMenu(event, block.id, index); }}>
           <span className="component-row-number">{index + 1}</span>
           <span className="component-row-icon" style={{ color: index === 0 ? "#fff" : block.color }}><Icon name={rowIcon(row, block.icon)} size={13}/></span>
           <span className="component-row-name">{row}</span>

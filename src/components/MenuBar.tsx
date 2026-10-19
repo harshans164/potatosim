@@ -14,7 +14,7 @@ const menus: { label: string; items: { label: string; action: AppAction; shortcu
   { label: "Tools", items: [{ label: "Options…", action: "placeholder" }] },
   { label: "Units", items: [{ label: "Metric (SI)", action: "placeholder" }, { label: "US Customary", action: "placeholder" }] },
   { label: "Extensions", items: [{ label: "Manage Extensions…", action: "placeholder" }] },
-  { label: "Help", items: [{ label: "Workbench Help", action: "placeholder" }, { label: "About CombustionLab", action: "about", divider: true }] },
+  { label: "Help", items: [{ label: "Workbench Help", action: "placeholder" }, { label: "About Simwhere", action: "about", divider: true }] },
 ];
 
 export function MenuBar({ onAction }: { onAction: (action: AppAction, label?: string) => void }) {
@@ -30,7 +30,7 @@ export function MenuBar({ onAction }: { onAction: (action: AppAction, label?: st
   }, []);
 
   return <div className="menu-bar" ref={rootRef} role="menubar">
-    <div className="app-mark">CL</div>
+    <div className="app-mark">SW</div>
     {menus.map(menu => <div className="menu-root" key={menu.label}>
       <button className={open === menu.label ? "menu-button active" : "menu-button"} onClick={() => setOpen(open === menu.label ? null : menu.label)} onMouseEnter={() => open && setOpen(menu.label)}>{menu.label}</button>
       {open === menu.label && <div className="menu-dropdown" role="menu">

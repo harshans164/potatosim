@@ -1,164 +1,291 @@
-import { useEffect, useRef, useState } from "react";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./geometry.css";
-import { GeometryTree } from "./components/GeometryTree";
-import { GeometryViewport } from "./components/GeometryViewport";
-import type { ConstraintType, GeometryFeature, GeometryProject, GeometryView, KernelMesh, KernelResult, KernelTopology, SketchEntity, SketchTool } from "./types/geometry";
+import { CadIcon, type CadIconName } from "./components/CadIcon";
+import { SketchSidebar } from "./components/SketchSidebar";
+import { SketchViewport } from "./components/SketchViewport";
+import {
+  EPSILON, dimensionKindForEntity, entityBounds, entityCenter, fromDisplayAngle, fromDisplayLength,
+  isSketchDocument, lineIntersection, mirrorEntity, offsetEntity, rotateEntity, scaleEntity,
+  setDimensionValue, translateEntity, uid,
+} from "./geometry/sketchMath";
+import { useSketchDocument } from "./hooks/useSketchDocument";
+import type {
+  CadSelection, DimensionKind, EditorTool, LengthUnit, Point2, SidebarMode, SketchDimension,
+  SketchDocument, SketchEntity, SketchProjectFile, ViewState,
+} from "./types/sketch";
 
-const uid = () => globalThis.crypto?.randomUUID?.() ?? `feature-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const initialFeatures = (): GeometryFeature[] => [
-  { id: "xy-plane", name: "XYPlane", type: "plane", visible: true, generated: true, params: {} },
-  { id: "yz-plane", name: "YZPlane", type: "plane", visible: false, generated: true, params: {} },
-  { id: "zx-plane", name: "ZXPlane", type: "plane", visible: false, generated: true, params: {} },
-];
-const solidTypes = new Set<GeometryFeature["type"]>(["box", "cylinder", "sphere", "extrude", "boolean", "step"]);
+const DRAW_TOOLS: EditorTool[] = ["line", "polyline", "rectangle", "rectangle3", "polygon", "circle", "arc3", "arcCenter", "ellipse"];
+const DIMENSION_TOOLS: EditorTool[] = ["dimGeneral", "dimHorizontal", "dimVertical", "dimLength", "dimRadius", "dimDiameter", "dimAngle", "dimMove"];
 
 export default function GeometryWindow() {
-  const [features, setFeatures] = useState<GeometryFeature[]>(initialFeatures);
-  const [selectedId, setSelectedId] = useState<string | null>("xy-plane");
-  const [tool, setTool] = useState<SketchTool>("select");
-  const [view, setView] = useState<GeometryView>("isometric");
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const store = useSketchDocument();
+  const { document, selection, commit, replace, undo, redo } = store;
+  const [mode, setMode] = useState<SidebarMode>("modeling");
+  const [tool, setTool] = useState<EditorTool>("select");
+  const [view, setView] = useState<ViewState>({ zoom: 1, pan: { x: 0, y: 0 } });
   const [status, setStatus] = useState("Ready");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [kernelMesh, setKernelMesh] = useState<KernelMesh | null>(null);
-  const [topology, setTopology] = useState<KernelTopology | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [showValidation, setShowValidation] = useState(false);
-  const [booleanDialog, setBooleanDialog] = useState(false);
-  const [booleanForm, setBooleanForm] = useState({ left: "", right: "", operation: "union" as "union" | "subtract" | "intersect" });
   const projectInput = useRef<HTMLInputElement>(null);
-  const stepInput = useRef<HTMLInputElement>(null);
 
-  const selected = features.find(feature => feature.id === selectedId);
-  const solids = features.filter(feature => solidTypes.has(feature.type));
-  const notify = (message: string) => { setStatus(message); window.setTimeout(() => setStatus("Ready"), 3200); };
-  const invalidate = () => { setKernelMesh(null); setTopology(null); };
-  const resetModel = () => { setFeatures(initialFeatures()); setSelectedId("xy-plane"); setKernelMesh(null); setTopology(null); setActiveMenu(null); };
+  const activePlane = document.planes.find(plane => plane.id === document.activePlaneId) ?? document.planes[0];
+  const activeSketch = document.sketches.find(sketch => sketch.id === document.activeSketchId) ?? null;
+  const visibleSketchIds = useMemo(() => new Set(document.sketches.filter(sketch => sketch.planeId === activePlane.id && sketch.visible).map(sketch => sketch.id)), [document.sketches, activePlane.id]);
+  const visibleEntities = useMemo(() => document.entities.filter(entity => visibleSketchIds.has(entity.sketchId)), [document.entities, visibleSketchIds]);
+  const visibleDimensions = useMemo(() => document.dimensions.filter(dimension => visibleSketchIds.has(dimension.sketchId)), [document.dimensions, visibleSketchIds]);
 
-  const addFeature = (type: "box" | "cylinder" | "sphere" | "sketch") => {
-    const count = features.filter(feature => feature.type === type).length + 1;
-    const offset = (count - 1) * 45;
-    const defaults: Record<string, Record<string, number>> = {
-      box: { width: 70, height: 55, depth: 35, x: offset, y: 0, z: 0 },
-      cylinder: { radius: 30, height: 65, x: offset, y: 0, z: 0 },
-      sphere: { radius: 38, x: offset, y: 0, z: 0 }, sketch: {},
-    };
-    const names = { box: "Box", cylinder: "Cylinder", sphere: "Sphere", sketch: "Sketch" };
-    const id = uid();
-    const feature: GeometryFeature = { id, name: `${names[type]}${count}`, type, visible: true, generated: false, params: defaults[type], parentId: selected?.type === "plane" ? selected.id : undefined, entities: type === "sketch" ? [] : undefined, constraints: type === "sketch" ? [] : undefined };
-    setFeatures(current => [...current, feature]); setSelectedId(id); setActiveMenu(null); invalidate(); notify(`${feature.name} inserted - click Generate to evaluate the B-rep`);
+  const notify = (message: string) => { setStatus(message); window.setTimeout(() => setStatus(current => current === message ? "Ready" : current), 3500); };
+  const makeSketch = (source: SketchDocument) => {
+    const count = source.sketches.length + 1, id = uid("sketch");
+    return { sketch: { id, name: `Sketch${count}`, planeId: source.activePlaneId, entityIds: [], generated: false, visible: true }, id };
   };
-  const newSketch = () => { addFeature("sketch"); setTool("line"); };
-  const extrude = () => {
-    if (selected?.type !== "sketch" || !selected.entities?.some(entity => entity.type !== "line")) { notify("Select a sketch with a closed rectangle or circle"); return; }
-    const feature: GeometryFeature = { id: uid(), name: `Extrude${features.filter(item => item.type === "extrude").length + 1}`, type: "extrude", parentId: selected.id, visible: true, generated: false, params: { depth: 30 } };
-    setFeatures(current => [...current, feature]); setSelectedId(feature.id); setTool("select"); invalidate(); notify("Extrude inserted - click Generate");
+  const newSketch = () => {
+    const created = makeSketch(document);
+    commit(current => ({ ...current, sketches: [...current.sketches, created.sketch], activeSketchId: created.id }));
+    setMode("sketching"); setTool("line");
+    store.setSelection({ kind: "sketch", ids: [created.id] });
+    notify(`New sketch created on ${activePlane.name}`);
   };
-
-  const evaluate = async (action: "evaluate" | "export_step" = "evaluate") => {
-    if (!isTauri()) { notify("The OpenCascade kernel is available in the Tauri application"); return null; }
-    setBusy(true); setStatus(action === "export_step" ? "Writing STEP model..." : "Evaluating exact geometry...");
-    try {
-      const result = await invoke<KernelResult>("geometry_kernel", { request: { action, features, tolerance: 0.15 } });
-      if (!result.ok) throw new Error(result.error || "Geometry evaluation failed");
-      if (result.mesh) setKernelMesh(result.mesh);
-      if (result.topology) setTopology(result.topology);
-      setFeatures(current => current.map(feature => ({ ...feature, generated: true })));
-      notify(result.topology?.valid ? "OpenCascade model generated and validated" : "Model generated with topology errors");
-      return result;
-    } catch (error) { notify(error instanceof Error ? error.message : String(error)); return null; }
-    finally { setBusy(false); }
+  const ensureSketchAndSetTool = (nextTool: EditorTool) => {
+    if ((DRAW_TOOLS.includes(nextTool) || DIMENSION_TOOLS.includes(nextTool) || nextTool === "move") && (!activeSketch || activeSketch.planeId !== document.activePlaneId)) {
+      const created = makeSketch(document);
+      commit(current => ({ ...current, sketches: [...current.sketches, created.sketch], activeSketchId: created.id }));
+      store.setSelection({ kind: "sketch", ids: [created.id] });
+    }
+    setMode("sketching"); setTool(nextTool); setActiveMenu(null);
+    notify(toolInstruction(nextTool));
   };
-  const validateTopology = async () => { const result = await evaluate(); if (result?.topology) setShowValidation(true); };
-  const exportStep = async () => {
-    const result = await evaluate("export_step"); if (!result?.step) return;
-    const url = URL.createObjectURL(new Blob([result.step], { type: "model/step" })); const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = "simwhere-geometry.step"; anchor.click(); URL.revokeObjectURL(url); notify("STEP model exported");
-  };
-  const importStep = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
-    const feature: GeometryFeature = { id: uid(), name: file.name.replace(/\.(step|stp)$/i, ""), type: "step", visible: true, generated: false, params: {}, stepData: await file.text() };
-    setFeatures(current => [...current, feature]); setSelectedId(feature.id); invalidate(); notify(`${file.name} loaded - click Generate to process STEP topology`);
+  const resetModel = () => {
+    if ((document.entities.length || document.sketches.length) && !window.confirm("Create a new geometry model? Unsaved sketch data will be cleared.")) return;
+    replace({ ...document, sketches: [], entities: [], dimensions: [], activePlaneId: "xy-plane", activeSketchId: null });
+    setView({ zoom: 1, pan: { x: 0, y: 0 } }); setMode("modeling"); setTool("select"); setActiveMenu(null); notify("New geometry model");
   };
 
-  const updateFeature = (id: string, changes: Partial<GeometryFeature>) => { setFeatures(current => current.map(feature => feature.id === id ? { ...feature, ...changes, generated: changes.name !== undefined ? feature.generated : false } : feature)); invalidate(); };
-  const addEntity = (featureId: string, entity: SketchEntity) => { setFeatures(current => current.map(feature => feature.id === featureId ? { ...feature, entities: [...(feature.entities ?? []), entity], generated: false } : feature)); invalidate(); };
-  const applyConstraint = (type: ConstraintType) => {
-    if (selected?.type !== "sketch" || !selected.entities?.length) { notify("Select a sketch containing at least one entity"); return; }
-    const entities = selected.entities.map(entity => ({ ...entity })); const last = entities[entities.length - 1]; const previous = entities.length > 1 ? entities[entities.length - 2] : undefined;
-    let value: number | undefined;
-    if (type === "horizontal" && last.type === "line") last.y2 = last.y1;
-    else if (type === "vertical" && last.type === "line") last.x2 = last.x1;
-    else if (type === "coincident" && previous) { last.x1 = previous.x2; last.y1 = previous.y2; }
-    else if (type === "equal" && previous && last.type === "line" && previous.type === "line") {
-      const length = Math.hypot(previous.x2 - previous.x1, previous.y2 - previous.y1), angle = Math.atan2(last.y2 - last.y1, last.x2 - last.x1); last.x2 = last.x1 + Math.cos(angle) * length; last.y2 = last.y1 + Math.sin(angle) * length;
-    } else if (type === "dimension") {
-      const current = last.type === "circle" ? Math.hypot(last.x2 - last.x1, last.y2 - last.y1) : Math.hypot(last.x2 - last.x1, last.y2 - last.y1);
-      const entered = window.prompt("Enter the exact dimension in millimetres:", current.toFixed(3)); if (!entered) return; value = Number(entered); if (!Number.isFinite(value) || value <= 0) { notify("Dimension must be a positive number"); return; }
-      const angle = Math.atan2(last.y2 - last.y1, last.x2 - last.x1); last.x2 = last.x1 + Math.cos(angle) * value; last.y2 = last.y1 + Math.sin(angle) * value;
-    } else { notify(`${type} is not applicable to the last sketch entity`); return; }
-    const entityIds = previous && (type === "coincident" || type === "equal") ? [previous.id, last.id] : [last.id];
-    const constraint = { id: uid(), type, entityIds, value };
-    setFeatures(current => current.map(feature => feature.id === selected.id ? { ...feature, entities, constraints: [...(feature.constraints ?? []), constraint], generated: false } : feature)); invalidate(); notify(`${type} constraint applied exactly`);
+  const addEntity = (source: SketchEntity) => {
+    if (!document.activeSketchId) return;
+    const nextId = source.id;
+    const nextName = `${entityLabel(source.type)}${document.entities.filter(entity => entity.type === source.type).length + 1}`;
+    commit(current => {
+      const entity = { ...source, id: nextId, name: nextName, sketchId: current.activeSketchId!, valid: entityIsValid(source) };
+      return { ...current, entities: [...current.entities, entity], sketches: current.sketches.map(sketch => sketch.id === current.activeSketchId ? { ...sketch, entityIds: [...sketch.entityIds, entity.id], generated: false } : sketch) };
+    });
+    store.setSelection({ kind: "entity", ids: [nextId] }); notify(`${nextName} created`);
   };
-  const createBoolean = () => {
-    if (!booleanForm.left || !booleanForm.right || booleanForm.left === booleanForm.right) { notify("Choose two different solids"); return; }
-    const feature: GeometryFeature = { id: uid(), name: `Boolean${features.filter(item => item.type === "boolean").length + 1}`, type: "boolean", visible: true, generated: false, params: {}, sourceIds: [booleanForm.left, booleanForm.right], operation: booleanForm.operation };
-    setFeatures(current => [...current.map(item => booleanForm.left === item.id || booleanForm.right === item.id ? { ...item, visible: false } : item), feature]);
-    setSelectedId(feature.id); setBooleanDialog(false); invalidate(); notify(`${booleanForm.operation} operation inserted - click Generate`);
+
+  const updateEntity = (id: string, updater: (entity: SketchEntity) => SketchEntity) => commit(current => ({
+    ...current,
+    entities: current.entities.map(entity => entity.id === id ? (() => { const next = updater(entity); return { ...next, valid: entityIsValid(next) }; })() : entity),
+    sketches: current.sketches.map(sketch => sketch.entityIds.includes(id) ? { ...sketch, generated: false } : sketch),
+  }));
+  const moveEntities = (ids: string[], delta: Point2) => commit(current => ({ ...current, entities: current.entities.map(entity => ids.includes(entity.id) ? translateEntity(entity, delta) : entity), sketches: current.sketches.map(sketch => ids.some(id => sketch.entityIds.includes(id)) ? { ...sketch, generated: false } : sketch) }));
+
+  const selectEntity = (id: string, additive: boolean, subIndex?: number) => {
+    if (!additive || selection.kind !== "entity") store.setSelection({ kind: "entity", ids: [id], subIndex });
+    else {
+      const ids = selection.ids.includes(id) ? selection.ids.filter(item => item !== id) : [...selection.ids, id];
+      store.setSelection({ kind: "entity", ids, subIndex });
+    }
   };
-  const openBooleanDialog = () => { setBooleanForm({ left: solids[0]?.id ?? "", right: solids[1]?.id ?? "", operation: "union" }); setBooleanDialog(true); };
-  const deleteSelected = () => {
-    if (!selected || selected.type === "plane") { notify("Datum planes cannot be deleted"); return; }
-    setFeatures(current => current.filter(feature => feature.id !== selected.id && feature.parentId !== selected.id && !feature.sourceIds?.includes(selected.id))); setSelectedId("xy-plane"); invalidate(); notify(`${selected.name} deleted`);
+
+  const lookAtPlane = (id: string) => {
+    const plane = document.planes.find(item => item.id === id); if (!plane) return;
+    const sketch = [...document.sketches].reverse().find(item => item.planeId === id);
+    commit(current => ({ ...current, activePlaneId: id, activeSketchId: sketch?.id ?? null }));
+    store.setSelection({ kind: "plane", ids: [id] }); setMode("modeling"); setTool("select"); setView({ zoom: 1, pan: { x: 0, y: 0 } }); notify(`Looking normal to ${plane.name}`);
   };
+
+  const addDimension = (requested: DimensionKind, entityId: string) => {
+    if (!document.activeSketchId) return;
+    const entity = document.entities.find(item => item.id === entityId); if (!entity) return;
+    let entityIds = [entityId];
+    if (requested === "angle") {
+      const firstId = selection.kind === "entity" ? selection.ids.find(id => id !== entityId && document.entities.find(item => item.id === id)?.type === "line") : undefined;
+      if (!firstId || entity.type !== "line") { store.setSelection({ kind: "entity", ids: [entityId] }); notify("Angle: Ctrl-select a second line, then click either line with Angle active"); return; }
+      entityIds = [firstId, entityId];
+    }
+    const kind = dimensionKindForEntity(requested, entity); if (!kind) { notify(`${requested} dimension is not supported for ${entity.type}`); return; }
+    const id = uid("dimension"), count = document.dimensions.length + 1;
+    const dimension: SketchDimension = { id, name: `Dimension${count}`, sketchId: document.activeSketchId, kind, entityIds, offset: { x: 0.02, y: 0.02 }, visible: true };
+    commit(current => ({ ...current, dimensions: [...current.dimensions, dimension], sketches: current.sketches.map(sketch => sketch.id === dimension.sketchId ? { ...sketch, generated: false } : sketch) }));
+    store.setSelection({ kind: "dimension", ids: [id] }); notify(`${kind} dimension created`);
+  };
+
+  const updateDimensionValue = (id: string, value: number) => commit(current => {
+    const dimension = current.dimensions.find(item => item.id === id); if (!dimension) return current;
+    const entities = setDimensionValue(dimension, current, value); if (!entities) return current;
+    return { ...current, entities, sketches: current.sketches.map(sketch => sketch.id === dimension.sketchId ? { ...sketch, generated: false } : sketch) };
+  });
+
+  const deleteSelection = () => {
+    if (selection.kind === "entity") {
+      const ids = selection.ids; if (!ids.length) return;
+      commit(current => ({ ...current, entities: current.entities.filter(entity => !ids.includes(entity.id)), dimensions: current.dimensions.filter(dimension => !dimension.entityIds.some(id => ids.includes(id))), sketches: current.sketches.map(sketch => ({ ...sketch, entityIds: sketch.entityIds.filter(id => !ids.includes(id)), generated: ids.some(id => sketch.entityIds.includes(id)) ? false : sketch.generated })) }));
+      store.setSelection({ kind: "sketch", ids: document.activeSketchId ? [document.activeSketchId] : [] }); notify(`${ids.length} entity${ids.length === 1 ? "" : "ies"} deleted`); return;
+    }
+    if (selection.kind === "dimension") { const ids = selection.ids; commit(current => ({ ...current, dimensions: current.dimensions.filter(item => !ids.includes(item.id)) })); store.setSelection({ kind: "sketch", ids: document.activeSketchId ? [document.activeSketchId] : [] }); notify("Dimension deleted"); return; }
+    notify("Select sketch geometry to delete");
+  };
+
+  const modify = (action: "copy" | "delete" | "trim" | "extend" | "offset" | "mirror" | "rotate" | "scale") => {
+    if (action === "delete") { deleteSelection(); return; }
+    const selected = selection.kind === "entity" ? document.entities.filter(entity => selection.ids.includes(entity.id)) : [];
+    if (!selected.length) { notify(`Select one or more entities before ${action}`); return; }
+    if (action === "copy") {
+      const copies = selected.map(entity => ({ ...translateEntity(entity, { x: .01, y: -.01 }), id: uid(entity.type), name: `${entity.name}_Copy`, valid: entity.valid }));
+      const ids = copies.map(entity => entity.id);
+      commit(current => ({ ...current, entities: [...current.entities, ...copies], sketches: current.sketches.map(sketch => sketch.id === current.activeSketchId ? { ...sketch, entityIds: [...sketch.entityIds, ...ids], generated: false } : sketch) }));
+      store.setSelection({ kind: "entity", ids }); notify("Selection copied by 10 mm"); return;
+    }
+    if (action === "trim" || action === "extend") {
+      if (selected.length !== 2 || selected.some(entity => entity.type !== "line")) { notify(`${action} requires exactly two Ctrl-selected lines`); return; }
+      const [first, second] = selected as Extract<SketchEntity, { type: "line" }>[];
+      const intersection = lineIntersection(first.start, first.end, second.start, second.end, action === "trim");
+      if (!intersection) { notify(action === "trim" ? "The selected line segments do not cross" : "Parallel lines cannot be extended to an intersection"); return; }
+      const replaceStart = Math.hypot(first.start.x - intersection.x, first.start.y - intersection.y) < Math.hypot(first.end.x - intersection.x, first.end.y - intersection.y);
+      updateEntity(first.id, entity => entity.type === "line" ? { ...entity, [replaceStart ? "start" : "end"]: intersection } : entity); notify(`${first.name} ${action === "trim" ? "trimmed" : "extended"} to intersection`); return;
+    }
+    if (action === "offset") {
+      const text = window.prompt(`Offset distance (${document.units.length})`, "10"); if (text === null) return;
+      const amount = fromDisplayLength(Number(text), document.units.length); if (!Number.isFinite(amount)) { notify("Enter a valid offset distance"); return; }
+      transformSelected(entity => offsetEntity(entity, amount) ?? entity, true); notify("Offset copies created"); return;
+    }
+    if (action === "mirror") {
+      const axis = window.prompt("Mirror about axis: X or Y", "X")?.trim().toLowerCase(); if (axis !== "x" && axis !== "y") return;
+      transformSelected(entity => mirrorEntity(entity, axis), true); notify(`Mirrored copy about ${axis.toUpperCase()} axis`); return;
+    }
+    if (action === "rotate") {
+      const text = window.prompt(`Rotation angle (${document.units.angle})`, document.units.angle === "deg" ? "45" : "0.7854"); if (text === null) return;
+      const angle = fromDisplayAngle(Number(text), document.units.angle); if (!Number.isFinite(angle)) return;
+      const origin = selectionCenter(selected); transformSelected(entity => rotateEntity(entity, angle, origin), false); notify("Selection rotated"); return;
+    }
+    const text = window.prompt("Scale factor", "2"); if (text === null) return; const factor = Number(text); if (!Number.isFinite(factor) || Math.abs(factor) < EPSILON) { notify("Scale factor must be non-zero"); return; }
+    const origin = selectionCenter(selected); transformSelected(entity => scaleEntity(entity, factor, origin), false); notify("Selection scaled");
+  };
+
+  const transformSelected = (transformer: (entity: SketchEntity) => SketchEntity, copy: boolean) => {
+    const ids = selection.ids;
+    const added = copy ? document.entities.filter(entity => ids.includes(entity.id)).map(entity => { const next = transformer(entity); return { ...next, id: uid(entity.type), name: `${entity.name}_Copy`, valid: entityIsValid(next) }; }) : [];
+    const newIds = added.map(entity => entity.id);
+    commit(current => {
+      if (copy) {
+        return { ...current, entities: [...current.entities, ...added], sketches: current.sketches.map(sketch => sketch.id === current.activeSketchId ? { ...sketch, entityIds: [...sketch.entityIds, ...newIds], generated: false } : sketch) };
+      }
+      return { ...current, entities: current.entities.map(entity => ids.includes(entity.id) ? (() => { const next = transformer(entity); return { ...next, valid: entityIsValid(next) }; })() : entity), sketches: current.sketches.map(sketch => ids.some(id => sketch.entityIds.includes(id)) ? { ...sketch, generated: false } : sketch) };
+    });
+    if (copy) store.setSelection({ kind: "entity", ids: newIds });
+  };
+
+  const generate = () => {
+    if (!activeSketch) { notify("Create or select a sketch first"); return; }
+    const sketchEntities = document.entities.filter(entity => entity.sketchId === activeSketch.id);
+    if (!sketchEntities.length) { notify("The active sketch contains no geometry"); return; }
+    const invalid = sketchEntities.filter(entity => !entityIsValid(entity));
+    if (invalid.length) { notify(`Cannot generate: ${invalid.length} invalid ${invalid.length === 1 ? "entity" : "entities"}`); return; }
+    commit(current => ({ ...current, sketches: current.sketches.map(sketch => sketch.id === activeSketch.id ? { ...sketch, generated: true } : sketch) }));
+    setMode("modeling"); setTool("select"); store.setSelection({ kind: "sketch", ids: [activeSketch.id] }); notify(`${activeSketch.name} generated and remains editable`);
+  };
+
+  const fitView = () => {
+    if (!visibleEntities.length) { setView({ zoom: 1, pan: { x: 0, y: 0 } }); return; }
+    const bounds = visibleEntities.map(entityBounds), minX = Math.min(...bounds.map(item => item.minX)), maxX = Math.max(...bounds.map(item => item.maxX)), minY = Math.min(...bounds.map(item => item.minY)), maxY = Math.max(...bounds.map(item => item.maxY));
+    const width = Math.max(maxX - minX, .02), height = Math.max(maxY - minY, .02), zoom = Math.min(16, Math.max(.1, Math.min(780 / (width * 1000), 430 / (height * 1000))));
+    setView({ zoom, pan: { x: -(minX + maxX) / 2 * 1000 * zoom, y: (minY + maxY) / 2 * 1000 * zoom } }); notify("View fitted to sketch geometry");
+  };
+
   const save = () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, features } satisfies GeometryProject, null, 2)], { type: "application/json" }));
-    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "geometry-model.clgeo.json"; anchor.click(); URL.revokeObjectURL(url); notify("Geometry model saved");
+    const file: SketchProjectFile = { format: "simwhere-geometry", version: 2, document, view };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
+    const anchor = globalThis.document.createElement("a"); anchor.href = url; anchor.download = "simwhere-geometry.clgeo.json"; anchor.click(); URL.revokeObjectURL(url); notify("Geometry project saved");
   };
   const open = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
-    try { const data = JSON.parse(await file.text()) as GeometryProject; if (data.version !== 1 || !Array.isArray(data.features)) throw new Error(); setFeatures(data.features); setSelectedId(null); invalidate(); notify("Geometry model opened"); }
-    catch { notify("The selected file is not a valid Geometry model"); }
+    try {
+      const data = JSON.parse(await file.text()) as Partial<SketchProjectFile>;
+      if (data.format !== "simwhere-geometry" || data.version !== 2 || !isSketchDocument(data.document)) throw new Error("Invalid document schema");
+      replace(data.document); setView(validView(data.view) ? data.view! : { zoom: 1, pan: { x: 0, y: 0 } }); setMode("modeling"); setTool("select"); notify(`${file.name} opened`);
+    } catch { notify("The selected file is not a valid Simwhere geometry project"); }
   };
+
+  const toggleVisibility = (kind: CadSelection["kind"], id: string) => commit(current => ({ ...current,
+    planes: kind === "plane" ? current.planes.map(item => item.id === id ? { ...item, visible: !item.visible } : item) : current.planes,
+    sketches: kind === "sketch" ? current.sketches.map(item => item.id === id ? { ...item, visible: !item.visible } : item) : current.sketches,
+    entities: kind === "entity" ? current.entities.map(item => item.id === id ? { ...item, visible: !item.visible } : item) : current.entities,
+    dimensions: kind === "dimension" ? current.dimensions.map(item => item.id === id ? { ...item, visible: !item.visible } : item) : current.dimensions,
+  }));
+  const rename = (kind: CadSelection["kind"], id: string, name: string) => commit(current => ({ ...current,
+    planes: kind === "plane" ? current.planes.map(item => item.id === id ? { ...item, name } : item) : current.planes,
+    sketches: kind === "sketch" ? current.sketches.map(item => item.id === id ? { ...item, name } : item) : current.sketches,
+    entities: kind === "entity" ? current.entities.map(item => item.id === id ? { ...item, name } : item) : current.entities,
+    dimensions: kind === "dimension" ? current.dimensions.map(item => item.id === id ? { ...item, name } : item) : current.dimensions,
+  }));
+
   useEffect(() => {
-    document.title = "Geometry";
-    const keydown = (event: KeyboardEvent) => { if (event.key === "Delete" && !(event.target as HTMLElement).matches("input, textarea")) deleteSelected(); if (event.key === "Escape") { setTool("select"); setActiveMenu(null); setBooleanDialog(false); } };
+    globalThis.document.title = "Geometry";
+    const keydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement; if (target.matches("input, textarea, select")) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); save(); }
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); store.setSelection({ kind: "entity", ids: visibleEntities.map(entity => entity.id) }); }
+      else if (event.key === "Delete") deleteSelection();
+      else if (event.key === "Escape") { setTool("select"); setActiveMenu(null); }
+    };
     window.addEventListener("keydown", keydown); return () => window.removeEventListener("keydown", keydown);
   });
 
-  return <div className="geometry-app">
-    <header className="geometry-menubar"><div className="geometry-appmark">CL</div>{["File", "Edit", "View", "Create", "Concept", "Tools", "Help"].map(label => <div className="geometry-menu-root" key={label}>
+  return <div className="geometry-app" onPointerDown={() => activeMenu && setActiveMenu(null)}>
+    <header className="geometry-menubar"><div className="geometry-appmark">SW</div>{["File", "Edit", "View", "Create", "Concept", "Tools", "Units", "Help"].map(label => <div className="geometry-menu-root" key={label} onPointerDown={event => event.stopPropagation()}>
       <button className={activeMenu === label ? "active" : ""} onClick={() => setActiveMenu(activeMenu === label ? null : label)}>{label}</button>
-      {activeMenu === label && <GeometryMenu label={label} onNew={resetModel} onOpen={() => projectInput.current?.click()} onSave={save} onCreate={addFeature} onSketch={newSketch} onView={setView} onNotify={notify}/>} 
-    </div>)}<span className="geometry-title">Geometry - OpenCascade</span></header>
+      {activeMenu === label && <GeometryMenu label={label} document={document} onNew={resetModel} onOpen={() => projectInput.current?.click()} onSave={save} onUndo={undo} onRedo={redo} onSelectAll={() => store.setSelection({ kind: "entity", ids: visibleEntities.map(entity => entity.id) })} onDeselect={() => store.setSelection({ kind: "sketch", ids: document.activeSketchId ? [document.activeSketchId] : [] })} onSketch={newSketch} onTool={ensureSketchAndSetTool} onFit={fitView} onUnits={(length, angle) => commit(current => ({ ...current, units: { ...current.units, ...(length ? { length } : {}), ...(angle ? { angle } : {}) } }))} onNotify={notify}/>}
+    </div>)}<span className="geometry-title">Geometry - 2D Sketcher</span></header>
     <div className="geometry-main-toolbar">
-      <ToolbarButton icon="N" label="New" onClick={resetModel}/><ToolbarButton icon="O" label="Open" onClick={() => projectInput.current?.click()}/><ToolbarButton icon="S" label="Save" onClick={save}/><ToolbarButton icon="IN" label="STEP In" onClick={() => stepInput.current?.click()}/><ToolbarButton icon="OUT" label="STEP Out" onClick={exportStep}/><span className="toolbar-rule"/>
-      <ToolbarButton icon="+" label="Select" active={tool === "select"} onClick={() => setTool("select")}/><ToolbarButton icon="P" label="Pan" active={tool === "pan"} onClick={() => setTool("pan")}/><ToolbarButton icon="F" label="Fit" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}/><span className="toolbar-rule"/>
-      <ToolbarButton icon="SK" label="New Sketch" onClick={newSketch}/><ToolbarButton icon="EX" label="Extrude" onClick={extrude}/><ToolbarButton icon="A-B" label="Boolean" onClick={openBooleanDialog}/><ToolbarButton icon="OK" label="Validate" onClick={validateTopology}/><span className="toolbar-fill"/><button className="generate-button" disabled={busy} onClick={() => void evaluate()}><span>{busy ? "..." : "*"}</span> {busy ? "Evaluating" : "Generate"}</button>
+      <ToolbarButton icon="new" label="New" onClick={resetModel}/><ToolbarButton icon="open" label="Open" onClick={() => projectInput.current?.click()}/><ToolbarButton icon="save" label="Save" onClick={save}/><span className="toolbar-rule"/>
+      <ToolbarButton icon="undo" label="Undo" disabled={!store.canUndo} onClick={undo}/><ToolbarButton icon="redo" label="Redo" disabled={!store.canRedo} onClick={redo}/><span className="toolbar-rule"/>
+      <ToolbarButton icon="select" label="Select" active={tool === "select"} onClick={() => setTool("select")}/><ToolbarButton icon="pan" label="Pan" active={tool === "pan"} onClick={() => setTool("pan")}/><ToolbarButton icon="fit" label="Fit" onClick={fitView}/><span className="toolbar-rule"/>
+      <button className="geometry-tool text-tool" title="Zoom out" onClick={() => setView(current => ({ ...current, zoom: Math.max(.1, current.zoom / 1.25) }))}>−</button><button className="geometry-tool text-tool" title="Zoom in" onClick={() => setView(current => ({ ...current, zoom: Math.min(20, current.zoom * 1.25) }))}>+</button>
+      <span className="toolbar-fill"/><span className="toolbar-readout">{activePlane.name}</span>
     </div>
     <div className="geometry-context-toolbar">
-      <span className="toolbar-section-label">Sketching</span>
-      <ToolbarButton icon="/" label="Line" active={tool === "line"} onClick={() => setTool("line")}/><ToolbarButton icon="[]" label="Rectangle" active={tool === "rectangle"} onClick={() => setTool("rectangle")}/><ToolbarButton icon="O" label="Circle" active={tool === "circle"} onClick={() => setTool("circle")}/><span className="toolbar-rule"/>
-      <span className="toolbar-section-label">Constraints</span><ToolbarButton icon="H" label="Horizontal" onClick={() => applyConstraint("horizontal")}/><ToolbarButton icon="V" label="Vertical" onClick={() => applyConstraint("vertical")}/><ToolbarButton icon="C" label="Coincident" onClick={() => applyConstraint("coincident")}/><ToolbarButton icon="=" label="Equal" onClick={() => applyConstraint("equal")}/><ToolbarButton icon="D" label="Dimension" onClick={() => applyConstraint("dimension")}/><span className="toolbar-rule"/>
-      <span className="toolbar-section-label">Create</span><ToolbarButton icon="B" label="Box" onClick={() => addFeature("box")}/><ToolbarButton icon="CY" label="Cylinder" onClick={() => addFeature("cylinder")}/><ToolbarButton icon="SP" label="Sphere" onClick={() => addFeature("sphere")}/><span className="toolbar-rule"/>
-      <span className="toolbar-section-label">View</span>{(["isometric", "front", "top", "right"] as GeometryView[]).map(item => <button className={`compact-tool ${view === item ? "active" : ""}`} key={item} onClick={() => setView(item)}>{item === "isometric" ? "ISO" : item.slice(0, 1).toUpperCase()}</button>)}
+      <select className="plane-selector" value={document.activePlaneId} onChange={event => lookAtPlane(event.target.value)}>{document.planes.map(plane => <option key={plane.id} value={plane.id}>{plane.name}</option>)}</select><span className="toolbar-rule"/>
+      <ToolbarButton icon="sketch" label="New Sketch" onClick={newSketch}/><ToolbarButton icon="line" label="Line" active={tool === "line"} onClick={() => ensureSketchAndSetTool("line")}/><ToolbarButton icon="rectangle" label="Rectangle" active={tool === "rectangle"} onClick={() => ensureSketchAndSetTool("rectangle")}/><ToolbarButton icon="circle" label="Circle" active={tool === "circle"} onClick={() => ensureSketchAndSetTool("circle")}/><span className="toolbar-rule"/>
+      <ToolbarButton icon="horizontal" label="Horizontal Dimension" active={tool === "dimHorizontal"} onClick={() => ensureSketchAndSetTool("dimHorizontal")}/><ToolbarButton icon="vertical" label="Vertical Dimension" active={tool === "dimVertical"} onClick={() => ensureSketchAndSetTool("dimVertical")}/><ToolbarButton icon="dimension" label="General Dimension" active={tool === "dimGeneral"} onClick={() => ensureSketchAndSetTool("dimGeneral")}/>
+    </div>
+    <div className="geometry-feature-toolbar">
+      <button className="feature-tool primary" onClick={generate}><CadIcon name="generate"/> Generate</button><button className="feature-tool" onClick={() => notify("Select geometry to edit exact values in Details View")}><CadIcon name="parameters"/> Parameters</button><span className="toolbar-rule"/>
+      <button className="feature-tool feature-placeholder" disabled title="3D modeling starts from a generated sketch"><CadIcon name="extrude"/> Extrude</button><button className="feature-tool feature-placeholder" disabled title="3D modeling is outside this sketching stage">↻ Revolve</button><button className="feature-tool feature-placeholder" disabled title="3D modeling is outside this sketching stage">⌁ Sweep</button><button className="feature-tool feature-placeholder" disabled title="3D modeling is outside this sketching stage">◆ Skin/Loft</button>
     </div>
     <div className="geometry-workspace">
-      <GeometryTree features={features} selectedId={selectedId} onSelect={setSelectedId} onVisibility={id => { setFeatures(current => current.map(feature => feature.id === id ? { ...feature, visible: !feature.visible } : feature)); invalidate(); }} onChange={updateFeature}/>
-      <GeometryViewport features={features} selectedId={selectedId} tool={tool} view={view} zoom={zoom} pan={pan} kernelMesh={kernelMesh} onSelect={setSelectedId} onEntity={addEntity} onZoom={setZoom} onPan={setPan} onView={setView}/>
+      <SketchSidebar document={document} mode={mode} activeTool={tool} selection={selection} onModeChange={setMode} onToolChange={ensureSketchAndSetTool} onSelect={next => { store.setSelection(next); if (next.kind === "sketch") { const sketch = document.sketches.find(item => item.id === next.ids[0]); if (sketch) commit(current => ({ ...current, activePlaneId: sketch.planeId, activeSketchId: sketch.id })); } }} onLookAtPlane={lookAtPlane} onRenamePlane={(id, name) => rename("plane", id, name)} onNewSketch={newSketch} onGenerate={generate} onToggleVisibility={toggleVisibility} onRename={rename} onUpdateEntity={updateEntity} onUpdateDimensionValue={updateDimensionValue} onModify={modify} onDisplayChange={changes => commit(current => ({ ...current, display: { ...current.display, ...changes } }))} onUnitSettingsChange={changes => commit(current => ({ ...current, units: { ...current.units, ...changes } }))}/>
+      <SketchViewport document={document} entities={visibleEntities} dimensions={visibleDimensions} activePlane={activePlane} activeTool={tool} selectedIds={selection.ids} selectionKind={selection.kind} view={view} onViewChange={setView} onSelectEntity={selectEntity} onSelectDimension={id => store.setSelection({ kind: "dimension", ids: [id] })} onClearSelection={() => store.setSelection({ kind: activeSketch ? "sketch" : "plane", ids: [activeSketch?.id ?? activePlane.id] })} onAddEntity={addEntity} onMoveEntities={moveEntities} onAddDimension={addDimension} onMoveDimension={(id, offset) => commit(current => ({ ...current, dimensions: current.dimensions.map(item => item.id === id ? { ...item, offset } : item) }))} onStatus={setStatus} onToolCancel={() => setTool("select")}/>
     </div>
-    <footer className="geometry-status"><span>Geometry</span><span className="geometry-status-main"><i className={status === "Ready" ? "ready" : "working"}/>{status}</span>{topology && <span className={topology.valid ? "topology-valid" : "topology-invalid"}>{topology.valid ? "Valid B-rep" : "Invalid B-rep"}</span>}<span>{view.charAt(0).toUpperCase() + view.slice(1)} View</span><span>{Math.round(zoom * 100)}%</span><span>SI Units (mm, kg, N, s)</span></footer>
-    <input ref={projectInput} type="file" accept=".json,.clgeo" hidden onChange={open}/><input ref={stepInput} type="file" accept=".step,.stp" hidden onChange={importStep}/>
-    {booleanDialog && <div className="geometry-modal-backdrop"><section className="geometry-modal"><header>Boolean Operation</header><label>Target body<select value={booleanForm.left} onChange={event => setBooleanForm(current => ({ ...current, left: event.target.value }))}>{solids.map(feature => <option value={feature.id} key={feature.id}>{feature.name}</option>)}</select></label><label>Tool body<select value={booleanForm.right} onChange={event => setBooleanForm(current => ({ ...current, right: event.target.value }))}>{solids.map(feature => <option value={feature.id} key={feature.id}>{feature.name}</option>)}</select></label><label>Operation<select value={booleanForm.operation} onChange={event => setBooleanForm(current => ({ ...current, operation: event.target.value as typeof current.operation }))}><option value="union">Union</option><option value="subtract">Subtract</option><option value="intersect">Intersect</option></select></label><footer><button onClick={() => setBooleanDialog(false)}>Cancel</button><button className="primary" onClick={createBoolean}>Insert</button></footer></section></div>}
-    {showValidation && topology && <div className="geometry-modal-backdrop"><section className="geometry-modal validation"><header>Topology Validation</header><div className={`validation-banner ${topology.valid ? "valid" : "invalid"}`}>{topology.valid ? "Valid manifold B-rep" : "Topology errors detected"}</div><div className="topology-grid"><span>Solids</span><b>{topology.solids}</b><span>Shells</span><b>{topology.shells}</b><span>Faces</span><b>{topology.faces}</b><span>Edges</span><b>{topology.edges}</b><span>Vertices</span><b>{topology.vertices}</b><span>Volume</span><b>{topology.volume.toFixed(3)} mm3</b><span>Surface area</span><b>{topology.area.toFixed(3)} mm2</b></div><footer><button className="primary" onClick={() => setShowValidation(false)}>Close</button></footer></section></div>}
+    <footer className="geometry-status"><span>Geometry</span><span className="geometry-status-main"><i className={status === "Ready" ? "ready" : "working"}/>{status}</span><span>{activePlane.name} Plane</span><span>{Math.round(view.zoom * 100)}%</span><span>{document.units.length} · {document.units.angle === "deg" ? "Degree" : "Radian"}</span><span>{visibleEntities.length} entities</span></footer>
+    <input ref={projectInput} type="file" accept=".json,.clgeo" hidden onChange={open}/>
   </div>;
 }
 
-function ToolbarButton({ icon, label, active, onClick }: { icon: string; label: string; active?: boolean; onClick: () => void }) { return <button className={`geometry-tool ${active ? "active" : ""}`} title={label} onClick={onClick}><span>{icon}</span><small>{label}</small></button>; }
-function GeometryMenu({ label, onNew, onOpen, onSave, onCreate, onSketch, onView, onNotify }: { label: string; onNew: () => void; onOpen: () => void; onSave: () => void; onCreate: (type: "box" | "cylinder" | "sphere" | "sketch") => void; onSketch: () => void; onView: (view: GeometryView) => void; onNotify: (message: string) => void }) {
-  const item = (text: string, action: () => void, shortcut = "") => <button onClick={action}><span>{text}</span><kbd>{shortcut}</kbd></button>;
-  return <div className="geometry-dropdown">{label === "File" ? <>{item("New Model", onNew, "Ctrl+N")}{item("Open Geometry...", onOpen, "Ctrl+O")}{item("Save Geometry", onSave, "Ctrl+S")}</> : label === "Create" ? <>{item("New Sketch", onSketch)}{item("Box", () => onCreate("box"))}{item("Cylinder", () => onCreate("cylinder"))}{item("Sphere", () => onCreate("sphere"))}</> : label === "View" ? <>{item("Isometric", () => onView("isometric"))}{item("Front", () => onView("front"))}{item("Top", () => onView("top"))}{item("Right", () => onView("right"))}</> : <>{item(label === "Help" ? "Geometry Help" : `${label} Options...`, () => onNotify(`${label} tools will be expanded in a later version`))}</>}</div>;
+function ToolbarButton({ icon, label, active, disabled, onClick }: { icon: CadIconName; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) { return <button className={`geometry-tool ${active ? "active" : ""}`} title={label} aria-label={label} disabled={disabled} onClick={onClick}><CadIcon name={icon}/></button>; }
+
+function GeometryMenu({ label, document, onNew, onOpen, onSave, onUndo, onRedo, onSelectAll, onDeselect, onSketch, onTool, onFit, onUnits, onNotify }: { label: string; document: SketchDocument; onNew: () => void; onOpen: () => void; onSave: () => void; onUndo: () => void; onRedo: () => void; onSelectAll: () => void; onDeselect: () => void; onSketch: () => void; onTool: (tool: EditorTool) => void; onFit: () => void; onUnits: (length?: LengthUnit, angle?: "deg" | "rad") => void; onNotify: (message: string) => void }) {
+  const item = (text: string, action: () => void, shortcut = "", active = false, disabled = false) => <button disabled={disabled} className={active ? "checked" : ""} onClick={action}><span>{active ? "✓ " : ""}{text}</span><kbd>{shortcut}</kbd></button>;
+  return <div className="geometry-dropdown">
+    {label === "File" && <>{item("New Model", onNew, "Ctrl+N")}{item("Open Geometry...", onOpen, "Ctrl+O")}{item("Save Geometry", onSave, "Ctrl+S")}</>}
+    {label === "Edit" && <>{item("Undo", onUndo, "Ctrl+Z")}{item("Redo", onRedo, "Ctrl+Y")}<hr/>{item("Select All", onSelectAll, "Ctrl+A")}{item("Deselect", onDeselect, "Esc")}</>}
+    {label === "View" && <>{item("Fit", onFit, "F")}{item("Show Grid", () => onNotify("Use Sketching > Settings to configure the grid"), "", document.display.grid)}</>}
+    {label === "Create" && <>{item("New Sketch", onSketch)}{item("Line", () => onTool("line"))}{item("Polyline", () => onTool("polyline"))}{item("Rectangle", () => onTool("rectangle"))}{item("Circle", () => onTool("circle"))}</>}
+    {label === "Concept" && <>{item("3D Concepts", () => onNotify("3D feature creation is intentionally disabled in this 2D sketching stage"), "", false, true)}</>}
+    {label === "Tools" && <>{item("Move", () => onTool("move"))}{item("General Dimension", () => onTool("dimGeneral"))}{item("Move Dimension", () => onTool("dimMove"))}</>}
+    {label === "Units" && <><div className="menu-caption">Length</div>{(["mm", "cm", "m", "in", "ft"] as LengthUnit[]).map(unit => item(unit, () => onUnits(unit), "", document.units.length === unit))}<hr/><div className="menu-caption">Angle</div>{item("Degrees", () => onUnits(undefined, "deg"), "", document.units.angle === "deg")}{item("Radians", () => onUnits(undefined, "rad"), "", document.units.angle === "rad")}</>}
+    {label === "Help" && <>{item("Sketcher controls", () => onNotify("Left-click to draw/select · middle-drag to pan · wheel to zoom · Esc to cancel"))}</>}
+  </div>;
 }
+
+function entityIsValid(entity: SketchEntity) {
+  if (entity.type === "line") return Math.hypot(entity.end.x - entity.start.x, entity.end.y - entity.start.y) > EPSILON;
+  if (entity.type === "polyline") return entity.points.length > 1 && entity.points.some((point, index) => index && Math.hypot(point.x - entity.points[index - 1].x, point.y - entity.points[index - 1].y) > EPSILON);
+  if (entity.type === "rectangle") return Math.hypot(entity.u.x, entity.u.y) > EPSILON && Math.hypot(entity.v.x, entity.v.y) > EPSILON;
+  if (entity.type === "ellipse") return entity.radiusX > EPSILON && entity.radiusY > EPSILON;
+  return entity.radius > EPSILON;
+}
+function entityLabel(type: SketchEntity["type"]) { return ({ line: "Line", polyline: "Polyline", rectangle: "Rectangle", circle: "Circle", arc: "Arc", ellipse: "Ellipse", polygon: "Polygon" })[type]; }
+function selectionCenter(entities: SketchEntity[]) { const points = entities.map(entityCenter); return { x: points.reduce((sum, point) => sum + point.x, 0) / points.length, y: points.reduce((sum, point) => sum + point.y, 0) / points.length }; }
+function validView(value: unknown): value is ViewState { if (!value || typeof value !== "object") return false; const view = value as Partial<ViewState>; return typeof view.zoom === "number" && view.zoom > 0 && !!view.pan && typeof view.pan.x === "number" && typeof view.pan.y === "number"; }
+function toolInstruction(tool: EditorTool) { return ({ line: "Line: click the start point, then the end point", polyline: "Polyline: click points, then Enter or right-click to finish", rectangle: "Rectangle: click two opposite corners", rectangle3: "3-point rectangle: click edge endpoints, then the height", polygon: "Polygon: click center, then a vertex", circle: "Circle: click center, then a radius point", arc3: "3-point arc: click start, through-point, then end", arcCenter: "Center arc: click center, start, then end", ellipse: "Ellipse: click center, major radius, then minor radius", move: "Move: drag selected geometry", dimGeneral: "General dimension: click a supported entity", dimHorizontal: "Horizontal dimension: click a line or rectangle", dimVertical: "Vertical dimension: click a line or rectangle", dimLength: "Length dimension: click a line or rectangle", dimRadius: "Radius dimension: click a circle or arc", dimDiameter: "Diameter dimension: click a circle or arc", dimAngle: "Angle: Ctrl-select two lines, then click either line", dimMove: "Move dimension: drag a dimension label", select: "Select geometry", pan: "Pan view" } as Record<EditorTool, string>)[tool]; }

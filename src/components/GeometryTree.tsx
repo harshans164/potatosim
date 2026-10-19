@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { GeometryFeature } from "../types/geometry";
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
 const featureGlyph: Record<GeometryFeature["type"], string> = { plane: "▱", sketch: "✎", box: "⬡", cylinder: "◉", sphere: "●", extrude: "▰", boolean: "◒", step: "S" };
 
 export function GeometryTree({ features, selectedId, onSelect, onVisibility, onChange }: Props) {
+  const [mode, setMode] = useState<"sketching" | "modeling">("modeling");
   const selected = features.find(feature => feature.id === selectedId);
   const planes = features.filter(feature => feature.type === "plane");
   const children = features.filter(feature => feature.type !== "plane");
@@ -19,14 +21,13 @@ export function GeometryTree({ features, selectedId, onSelect, onVisibility, onC
       <div className="geometry-panel-title"><span>Tree Outline</span><span>▾</span></div>
       <div className="tree-toolbar"><button title="Expand all">＋</button><button title="Collapse all">−</button><button title="Tree options">⚙</button></div>
       <div className="model-tree">
-        <div className="tree-node root"><span className="tree-arrow">▾</span><span className="tree-model-icon">M</span><strong>Model</strong></div>
-        <div className="tree-node branch"><span className="tree-arrow">▾</span><span className="tree-folder">▰</span><span>Planes</span></div>
-        {planes.map(feature => <TreeItem key={feature.id} feature={feature} selected={selectedId === feature.id} depth={2} onSelect={onSelect} onVisibility={onVisibility}/>)}
-        <div className="tree-node branch"><span className="tree-arrow">▾</span><span className="tree-folder bodies">▰</span><span>Geometry</span></div>
-        {children.length === 0 && <div className="tree-empty">No features</div>}
-        {children.map(feature => <TreeItem key={feature.id} feature={feature} selected={selectedId === feature.id} depth={2} onSelect={onSelect} onVisibility={onVisibility}/>)}
+        <div className="tree-node root"><span className="tree-arrow">▾</span><span className="tree-model-icon">A</span><strong>Geometry</strong></div>
+        {planes.map(feature => <TreeItem key={feature.id} feature={feature} selected={selectedId === feature.id} depth={1} onSelect={onSelect} onVisibility={onVisibility}/>)}
+        <div className="tree-node summary"><span className="feature-glyph box">◆</span><span>{children.filter(feature => feature.type !== "sketch").length} Parts, {children.filter(feature => feature.type !== "sketch").length} Bodies</span></div>
+        {children.map(feature => <TreeItem key={feature.id} feature={feature} selected={selectedId === feature.id} depth={1} onSelect={onSelect} onVisibility={onVisibility}/>)}
       </div>
     </section>
+    <div className="geometry-mode-tabs"><button className={mode === "sketching" ? "active" : ""} onClick={() => setMode("sketching")}>Sketching</button><button className={mode === "modeling" ? "active" : ""} onClick={() => setMode("modeling")}>Modeling</button></div>
     <section className="geometry-details-panel">
       <div className="geometry-panel-title"><span>Details View</span><span>{selected ? featureGlyph[selected.type] : ""}</span></div>
       {selected ? <div className="details-content">

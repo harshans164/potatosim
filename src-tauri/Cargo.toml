@@ -1,7 +1,7 @@
 [package]
 name = "simwhere"
 version = "0.1.0"
-description = "A Tauri App"
+description = "Simwhere engineering workbench"
 authors = ["you"]
 edition = "2024"
 

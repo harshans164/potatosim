@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "simwhere",
+  "productName": "Simwhere",
   "version": "0.1.0",
   "identifier": "com.acer.simwhere",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "CombustionLab Workbench",
+        "title": "Simwhere Workbench",
         "width": 1180,
         "height": 760,
         "minWidth": 720,

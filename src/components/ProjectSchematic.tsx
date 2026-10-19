@@ -41,19 +41,19 @@ export function ProjectSchematic({ blocks, selectedId, zoom, onZoom, onAdd, onMo
       const point = canvasPoint(detail.x, detail.y);
       onAdd(detail.item, Math.max(16, point.x - 80), Math.max(16, point.y - 20));
     };
-    window.addEventListener("combustionlab-pointer-drop", pointerDrop);
-    return () => window.removeEventListener("combustionlab-pointer-drop", pointerDrop);
+    window.addEventListener("simwhere-pointer-drop", pointerDrop);
+    return () => window.removeEventListener("simwhere-pointer-drop", pointerDrop);
   });
 
   const dragOverCanvas = (event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes("application/x-combustionlab-component")) return;
+    if (!event.dataTransfer.types.includes("application/x-simwhere-component")) return;
     event.preventDefault(); event.dataTransfer.dropEffect = "copy";
     setDragOver(true); setDropPoint(canvasPoint(event.clientX, event.clientY));
   };
   const drop = (event: React.DragEvent) => {
     event.preventDefault(); setDragOver(false); setDropPoint(null);
     try {
-      const item = JSON.parse(event.dataTransfer.getData("application/x-combustionlab-component")) as ComponentMetadata;
+      const item = JSON.parse(event.dataTransfer.getData("application/x-simwhere-component")) as ComponentMetadata;
       const point = canvasPoint(event.clientX, event.clientY);
       onAdd(item, Math.max(16, point.x - 85), Math.max(16, point.y - 20));
     } catch { /* Ignore foreign drag data. */ }
@@ -87,7 +87,7 @@ export function ProjectSchematic({ blocks, selectedId, zoom, onZoom, onAdd, onMo
       <div className="canvas-surface" style={{ transform: `scale(${zoom})` }}>
         {blocks.length === 0 && <div className="empty-state"><Icon name="custom" size={30}/><strong>Build your simulation workflow</strong><span>Drag systems and components here from the Toolbox.</span></div>}
         {(pointerDropPoint ?? dropPoint) && <div className="drop-indicator" style={{ left: (pointerDropPoint ?? dropPoint)!.x - 80, top: (pointerDropPoint ?? dropPoint)!.y - 20 }}><span>Place component here</span></div>}
-        {blocks.map(block => <SystemBlock key={block.id} block={block} selected={selectedId === block.id} onSelect={id => onSelect(id)} onMoveStart={moveStart} onContextMenu={(event, id) => { event.preventDefault(); event.stopPropagation(); onSelect(id); onContextMenu({ blockId: id, x: event.clientX, y: event.clientY }); }}/>) }
+        {blocks.map(block => <SystemBlock key={block.id} block={block} selected={selectedId === block.id} onSelect={id => onSelect(id)} onMoveStart={moveStart} onContextMenu={(event, id, rowIndex) => { event.preventDefault(); event.stopPropagation(); onSelect(id); onContextMenu({ blockId: id, x: event.clientX, y: event.clientY, rowIndex }); }}/>) }
       </div>
     </div>
   </main>;

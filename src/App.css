@@ -126,6 +126,7 @@ button { color: inherit; }
 .notes-dialog footer button { min-width: 70px; height: 25px; border: 1px solid #929a9f; background: linear-gradient(#fff, #e3e6e7); }
 .notes-dialog footer .primary-action { border-color: #2f719d; color: white; background: linear-gradient(#4d95c4, #327cab); }
 .geometry-window { width: 100vw; height: 100vh; margin: 0; background: #f7f8f9; }
+.mesh-window { width: 100vw; height: 100vh; margin: 0; background: #f7f8f9; }
 .hidden-file-input { display: none; }
 
 @media (max-width: 760px) { .workbench { grid-template-columns: 195px minmax(0, 1fr); } .tool-button { min-width: 36px; padding-inline: 5px; } .tool-button span { display: none; } .status-message { min-width: 120px; } }

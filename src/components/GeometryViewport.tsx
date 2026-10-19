@@ -12,20 +12,21 @@ interface Props {
   onEntity: (featureId: string, entity: SketchEntity) => void;
   onZoom: (value: number) => void;
   onPan: (value: { x: number; y: number }) => void;
-  onView: (view: GeometryView) => void;
   kernelMesh: KernelMesh | null;
 }
 
 const uid = () => globalThis.crypto?.randomUUID?.() ?? `entity-${Date.now()}`;
 
-export function GeometryViewport({ features, selectedId, tool, view, zoom, pan, onSelect, onEntity, onZoom, onPan, onView, kernelMesh }: Props) {
+export function GeometryViewport({ features, selectedId, tool, view, zoom, pan, onSelect, onEntity, onZoom, onPan, kernelMesh }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [draft, setDraft] = useState<SketchEntity | null>(null);
   const [panStart, setPanStart] = useState<{ clientX: number; clientY: number; x: number; y: number } | null>(null);
   const selectedSketch = features.find(feature => feature.id === selectedId && feature.type === "sketch");
   const point = (event: React.PointerEvent) => {
     const rect = svgRef.current!.getBoundingClientRect();
-    return { x: (event.clientX - rect.left - rect.width / 2 - pan.x) / zoom, y: (event.clientY - rect.top - rect.height / 2 - pan.y) / zoom };
+    const viewX = (event.clientX - rect.left) / rect.width * 1000 - 500;
+    const viewY = (event.clientY - rect.top) / rect.height * 600 - 300;
+    return { x: (viewX - pan.x) / zoom, y: (viewY - pan.y) / zoom };
   };
   const pointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (event.button === 1 || tool === "pan") { event.currentTarget.setPointerCapture(event.pointerId); setPanStart({ clientX: event.clientX, clientY: event.clientY, x: pan.x, y: pan.y }); return; }
@@ -34,7 +35,7 @@ export function GeometryViewport({ features, selectedId, tool, view, zoom, pan, 
     setDraft({ id: uid(), type: tool, x1: start.x, y1: start.y, x2: start.x, y2: start.y } as SketchEntity);
   };
   const pointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (panStart) { onPan({ x: panStart.x + event.clientX - panStart.clientX, y: panStart.y + event.clientY - panStart.clientY }); return; }
+    if (panStart) { const rect = svgRef.current!.getBoundingClientRect(); onPan({ x: panStart.x + (event.clientX - panStart.clientX) * 1000 / rect.width, y: panStart.y + (event.clientY - panStart.clientY) * 600 / rect.height }); return; }
     if (draft) { const current = point(event); setDraft({ ...draft, x2: current.x, y2: current.y }); }
   };
   const pointerUp = () => {
@@ -46,26 +47,25 @@ export function GeometryViewport({ features, selectedId, tool, view, zoom, pan, 
   const viewTransform: Record<GeometryView, string> = { isometric: "rotate(0)", front: "rotate(0) scale(1 1)", top: "rotate(-28) scale(1 .82)", right: "rotate(24) scale(.88 1)" };
   return <section className="geometry-viewport-wrap">
     <div className="viewport-label">Graphics</div>
-    <svg ref={svgRef} className={`geometry-viewport tool-${tool}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={event => { event.preventDefault(); onZoom(Math.min(3, Math.max(.3, zoom * (event.deltaY < 0 ? 1.1 : .9)))); }}>
+    <svg ref={svgRef} className={`geometry-viewport tool-${tool}`} viewBox="-500 -300 1000 600" preserveAspectRatio="none" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={event => { event.preventDefault(); onZoom(Math.min(3, Math.max(.3, zoom * (event.deltaY < 0 ? 1.1 : .9)))); }}>
       <defs>
-        <pattern id="minorGrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#e2e7ea" strokeWidth="1"/></pattern>
         <linearGradient id="boxTop" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#d9edf8"/><stop offset="1" stopColor="#98c4db"/></linearGradient>
         <linearGradient id="cylinderFill" x1="0" y1="0" x2="1" y2="0"><stop stopColor="#6ca6c6"/><stop offset=".5" stopColor="#d3ecf6"/><stop offset="1" stopColor="#4b88aa"/></linearGradient>
         <radialGradient id="sphereFill" cx="35%" cy="28%"><stop stopColor="#eaf7fc"/><stop offset=".45" stopColor="#8ac2df"/><stop offset="1" stopColor="#39799c"/></radialGradient>
+        <marker id="axisRed" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7z" fill="#be121a"/></marker>
+        <marker id="axisGreen" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7z" fill="#178b22"/></marker>
+        <marker id="axisBlue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0L9 3.5 0 7z" fill="#2025ad"/></marker>
       </defs>
-      <rect width="100%" height="100%" fill="#fbfcfd"/>
-      <rect width="100%" height="100%" fill="url(#minorGrid)" opacity={view === "isometric" ? .35 : .8}/>
-      <g transform={`translate(50%, 50%) translate(${pan.x} ${pan.y}) scale(${zoom})`}>
-        <g className="world-axes"><path d="M-1000 0H1000"/><path d="M0-1000V1000"/></g>
-        {features.filter(feature => feature.visible && feature.type === "plane").map((feature, index) => <g key={feature.id} className={`datum-plane ${feature.id === selectedId ? "selected" : ""}`} transform={`rotate(${index * 58})`} onPointerDown={event => { event.stopPropagation(); onSelect(feature.id); }}><polygon points="-155,-82 155,-82 155,82 -155,82"/><text x="-148" y="-89">{feature.name}</text></g>)}
+      <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
+        <g className="origin-axes"><line className="axis-x-main" x1="-260" y1="-145" x2="260" y2="145"/><line className="axis-y-main" x1="0" y1="230" x2="0" y2="-230"/><line className="axis-z-main" x1="165" y1="-105" x2="-165" y2="105"/><line className="axis-x-arrow" x1="0" y1="0" x2="82" y2="46" markerEnd="url(#axisRed)"/><line className="axis-y-arrow" x1="0" y1="0" x2="0" y2="-83" markerEnd="url(#axisGreen)"/><line className="axis-z-arrow" x1="0" y1="0" x2="-72" y2="48" markerEnd="url(#axisBlue)"/><circle r="3"/></g>
         {kernelMesh ? <KernelMeshShape mesh={kernelMesh} view={view}/> : <g transform={viewTransform[view]}>{features.filter(feature => feature.visible && feature.type !== "plane" && feature.type !== "sketch").map((feature, index) => <FeatureShape key={feature.id} feature={feature} index={index} selected={feature.id === selectedId} onSelect={onSelect}/>)}</g>}
         <g className="sketch-entities">{sketchEntities.map(entity => <SketchShape key={entity.id} entity={entity}/>) }{draft && <SketchShape entity={draft} draft/>}</g>
       </g>
     </svg>
-    <div className="view-cube" title="Click a face to change view">
-      <button className="cube-top" onClick={() => onView("top")}>TOP</button><button className="cube-front" onClick={() => onView("front")}>FRONT</button><button className="cube-side" onClick={() => onView("right")}>R</button>
-    </div>
+    <div className="viewport-brand">Simwhere<small>Geometry</small></div>
     <div className="axis-triad"><span className="axis-z">Z</span><span className="axis-y">Y</span><span className="axis-x">X</span><i/></div>
+    <div className="graphics-scale"><div className="scale-labels"><span>0.000</span><span>15.000</span><span>30.000 (mm)</span></div><div className="scale-bar"><i/><i/><i/><i/></div><div className="scale-minor"><span>7.500</span><span>22.500</span></div></div>
+    <div className="model-view-tabs"><button className="active">Model View</button><button>Print Preview</button></div>
     <div className="viewport-hint">{selectedSketch && tool !== "select" ? `Sketching ${tool}: drag in the graphics area` : "Middle-drag or Pan to move • Mouse wheel to zoom"}</div>
   </section>;
 }
