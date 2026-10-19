@@ -1,0 +1,118 @@
+:root { font-family: "Segoe UI", Tahoma, sans-serif; color: #20272c; background: #dfe3e6; font-size: 12px; }
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+.geometry-app { width: 100vw; height: 100vh; min-width: 760px; display: grid; grid-template-rows: 27px 49px 42px minmax(0, 1fr) 23px; background: #dfe3e6; user-select: none; }
+.geometry-menubar { display: flex; align-items: stretch; position: relative; z-index: 40; border-bottom: 1px solid #899399; background: linear-gradient(#fbfbfb, #e4e6e7); }
+.geometry-appmark { width: 29px; margin: 3px 5px; display: grid; place-items: center; color: white; background: #356e94; border: 1px solid #245675; font-size: 10px; font-weight: 700; }
+.geometry-menu-root { position: relative; }
+.geometry-menu-root > button { height: 26px; padding: 0 9px; border: 0; background: transparent; cursor: default; }
+.geometry-menu-root > button:hover, .geometry-menu-root > button.active { outline: 1px solid #9bb8ca; outline-offset: -1px; background: #d9eaf5; }
+.geometry-title { margin-left: auto; padding: 6px 10px 0; color: #68737a; font-weight: 600; }
+.geometry-dropdown { min-width: 190px; position: absolute; top: 26px; left: 0; padding: 3px 0; border: 1px solid #7f888e; background: #fafafa; box-shadow: 2px 4px 8px #0004; }
+.geometry-dropdown button { width: 100%; height: 26px; display: flex; align-items: center; justify-content: space-between; border: 0; padding: 0 10px 0 22px; background: transparent; text-align: left; white-space: nowrap; }
+.geometry-dropdown button:hover { background: #d9ebf7; }
+.geometry-dropdown kbd { color: #69747a; font-family: inherit; font-size: 10px; }
+.geometry-main-toolbar, .geometry-context-toolbar { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 3px 6px; border-bottom: 1px solid #9fa8ad; background: #eef0f1; }
+.geometry-context-toolbar { background: #e3e6e8; }
+.geometry-tool { min-width: 40px; height: 41px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 1px 6px; border: 1px solid transparent; background: transparent; cursor: default; }
+.geometry-tool > span { color: #315e7a; font-size: 17px; line-height: 18px; font-weight: 600; }
+.geometry-tool small { font-size: 9px; white-space: nowrap; }
+.geometry-tool:hover, .geometry-tool.active, .compact-tool:hover, .compact-tool.active { border-color: #89abc0; background: #d5e8f4; }
+.toolbar-rule { width: 1px; align-self: stretch; margin: 2px 5px; background: #b5bcc0; }
+.toolbar-fill { flex: 1; }
+.generate-button { height: 31px; display: flex; align-items: center; gap: 6px; padding: 0 13px; border: 1px solid #4a7997; background: linear-gradient(#f8fbfc, #c9dce8); color: #234e69; font-weight: 600; }
+.generate-button:hover { background: #d8ebf6; }
+.generate-button span { color: #d19a00; font-size: 16px; }
+.toolbar-section-label { align-self: stretch; display: flex; align-items: flex-end; padding: 0 3px 1px; color: #69747b; font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); }
+.compact-tool { width: 29px; height: 27px; border: 1px solid #a5adb2; background: #f7f8f8; font-size: 10px; font-weight: 600; }
+
+.geometry-workspace { min-height: 0; display: grid; grid-template-columns: 265px minmax(0, 1fr); }
+.geometry-sidebar { min-height: 0; display: grid; grid-template-rows: minmax(180px, 46%) minmax(190px, 54%); border-right: 1px solid #7f898f; background: #eef0f1; }
+.geometry-tree-panel, .geometry-details-panel { min-height: 0; display: grid; grid-template-rows: 26px minmax(0, 1fr); border-bottom: 1px solid #858f95; }
+.geometry-tree-panel { grid-template-rows: 26px 25px minmax(0, 1fr); }
+.geometry-panel-title, .viewport-label { height: 26px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px; border-bottom: 1px solid #929da3; background: linear-gradient(#f7f9fa, #cfd7dc); color: #263d4b; font-weight: 600; }
+.tree-toolbar { display: flex; align-items: center; gap: 2px; padding: 2px 4px; border-bottom: 1px solid #c0c6ca; background: #e5e8e9; }
+.tree-toolbar button { width: 23px; height: 20px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; background: transparent; }
+.tree-toolbar button:hover { border-color: #9ab3c3; background: #d5e7f2; }
+.model-tree { min-height: 0; overflow: auto; padding: 3px 0; background: white; }
+.tree-node { height: 23px; display: flex; align-items: center; gap: 4px; padding-right: 5px; white-space: nowrap; }
+.tree-node:hover { background: #e7f1f7; }
+.tree-node.selected { color: white; background: #347fac; }
+.tree-node.root { padding-left: 4px; }
+.tree-node.branch { padding-left: 17px; }
+.tree-arrow { width: 11px; color: #59656d; font-size: 9px; }
+.tree-model-icon { width: 17px; height: 17px; display: grid; place-items: center; color: white; background: #376d91; font-size: 9px; }
+.tree-folder { color: #d4aa26; }
+.tree-folder.bodies { color: #5a91b2; }
+.tree-empty { padding: 5px 0 5px 46px; color: #92999d; font-style: italic; font-size: 10px; }
+.visibility { width: 16px; height: 18px; display: grid; place-items: center; padding: 0; border: 0; color: #9aa3a8; background: transparent; font-size: 10px; }
+.visibility.visible { color: #316f96; }
+.tree-node.selected .visibility { color: white; }
+.feature-glyph { width: 17px; color: #a67e0d; text-align: center; font-weight: 700; }
+.feature-glyph.box, .feature-glyph.cylinder, .feature-glyph.sphere, .feature-glyph.extrude { color: #3c83aa; }
+.tree-node.selected .feature-glyph { color: white; }
+.tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tree-state { font-size: 9px; }
+.tree-state.ok { color: #3b8c48; }
+.tree-state.pending { color: #d19400; }
+.tree-node.selected .tree-state { color: white; }
+.details-content { overflow: auto; background: #f6f7f7; }
+.details-section { height: 23px; display: flex; align-items: center; padding: 0 6px; border-bottom: 1px solid #aeb6ba; background: linear-gradient(#e1e6e9, #cad2d7); color: #314955; font-weight: 600; }
+.details-content label { min-height: 26px; display: grid; grid-template-columns: 92px 1fr; border-bottom: 1px solid #d0d5d8; }
+.details-content label > span { display: flex; align-items: center; padding: 3px 6px; border-right: 1px solid #c2c8cb; background: #e8ebed; color: #4f5a61; }
+.details-content input, .details-content output { min-width: 0; height: 25px; display: flex; align-items: center; padding: 2px 5px; border: 0; background: white; outline: none; user-select: text; }
+.details-content input:focus { outline: 1px solid #5c99bd; outline-offset: -1px; }
+.details-content output.generated { color: #318040; }
+.details-content output.pending { color: #a97800; }
+.details-empty { padding: 12px; background: #f8f9f9; color: #7c858a; }
+
+.geometry-viewport-wrap { min-width: 0; min-height: 0; position: relative; display: grid; grid-template-rows: 26px minmax(0, 1fr); overflow: hidden; background: white; }
+.viewport-label { position: relative; z-index: 3; }
+.geometry-viewport { width: 100%; height: 100%; display: block; touch-action: none; cursor: default; }
+.geometry-viewport.tool-line, .geometry-viewport.tool-rectangle, .geometry-viewport.tool-circle { cursor: crosshair; }
+.geometry-viewport.tool-pan { cursor: grab; }
+.world-axes path { fill: none; stroke: #cbd4d9; stroke-width: .8; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.datum-plane { cursor: pointer; }
+.datum-plane polygon { fill: #efd76d14; stroke: #c49d1e; stroke-width: 1; stroke-dasharray: 7 4; vector-effect: non-scaling-stroke; }
+.datum-plane text { fill: #967714; font-size: 10px; }
+.datum-plane:hover polygon, .datum-plane.selected polygon { fill: #edcc4040; stroke: #df8f00; stroke-width: 2; }
+.model-shape { cursor: pointer; stroke: #376b87; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.model-shape:hover, .model-shape.selected { filter: drop-shadow(0 0 3px #ef9d24); stroke: #e58500; stroke-width: 2; }
+.kernel-mesh polygon { stroke: #315f78; stroke-width: .55; vector-effect: non-scaling-stroke; }
+.shape-detail { fill: none; stroke: #4a829f; }
+.sketch-entities line, .sketch-entities rect, .sketch-entities circle { fill: none; stroke: #236ba0; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.sketch-entities .draft { stroke: #e17b13; stroke-dasharray: 4 3; }
+.view-cube { width: 88px; height: 77px; position: absolute; top: 42px; right: 17px; filter: drop-shadow(2px 3px 3px #0003); }
+.view-cube button { position: absolute; border: 1px solid #6f8795; color: #3d5664; background: #dce9efdd; font-size: 8px; font-weight: 700; }
+.view-cube button:hover { background: #a9d4ea; }
+.cube-front { left: 13px; top: 28px; width: 51px; height: 39px; }
+.cube-top { left: 13px; top: 5px; width: 51px; height: 24px; transform: skewX(-28deg); }
+.cube-side { left: 64px; top: 17px; width: 21px; height: 42px; transform: skewY(-36deg); }
+.axis-triad { width: 75px; height: 70px; position: absolute; left: 18px; bottom: 28px; color: #333; font-size: 10px; font-weight: 700; }
+.axis-triad:before, .axis-triad:after, .axis-triad i { content: ""; position: absolute; left: 28px; bottom: 20px; height: 35px; border-left: 2px solid #3b80b8; transform-origin: bottom; }
+.axis-triad:before { border-color: #d4433b; transform: rotate(90deg); }
+.axis-triad:after { border-color: #41a253; transform: rotate(-45deg); }
+.axis-triad i { border-color: #3d70bd; }
+.axis-x { position: absolute; right: 3px; bottom: 16px; color: #c7342e; }.axis-y { position: absolute; left: 2px; top: 4px; color: #298d3d; }.axis-z { position: absolute; left: 24px; top: 0; color: #315fa6; }
+.viewport-hint { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); padding: 3px 8px; border: 1px solid #c7ced2; background: #ffffffd9; color: #6a747a; font-size: 10px; pointer-events: none; }
+.geometry-status { display: flex; align-items: center; border-top: 1px solid #899298; background: linear-gradient(#eef0f1, #d4d9dc); font-size: 10px; }
+.geometry-status > span { height: 17px; display: flex; align-items: center; padding: 0 9px; border-right: 1px solid #adb5ba; }
+.geometry-status-main { flex: 1; }
+.geometry-status i { width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; }
+.geometry-status i.ready { background: #43904c; }.geometry-status i.working { background: #d09516; }
+.topology-valid { color: #26743a; font-weight: 600; }.topology-invalid { color: #a73028; font-weight: 600; }
+.geometry-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: #15242e55; }
+.geometry-modal { width: 370px; border: 1px solid #66747d; background: #f3f5f6; box-shadow: 4px 7px 18px #0005; }
+.geometry-modal > header { height: 31px; display: flex; align-items: center; padding: 0 10px; color: white; background: #3c6e8e; font-weight: 600; }
+.geometry-modal > label { min-height: 35px; display: grid; grid-template-columns: 105px 1fr; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid #d1d6d9; }
+.geometry-modal select { height: 25px; border: 1px solid #959fa5; border-radius: 0; background: white; }
+.geometry-modal > footer { display: flex; justify-content: flex-end; gap: 6px; padding: 9px 10px; border-top: 1px solid #bdc5c9; }
+.geometry-modal > footer button { min-width: 74px; height: 26px; border: 1px solid #919ba1; background: linear-gradient(#fff, #dde2e5); }
+.geometry-modal > footer button.primary { border-color: #2e6c94; color: white; background: linear-gradient(#5595bd, #3479a4); }
+.validation-banner { margin: 12px 12px 8px; padding: 8px; border: 1px solid; font-weight: 600; }
+.validation-banner.valid { border-color: #79a982; color: #286f38; background: #e8f5ea; }.validation-banner.invalid { border-color: #c78780; color: #9a2921; background: #fae9e7; }
+.topology-grid { margin: 0 12px 12px; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #b8c0c4; }
+.topology-grid > * { min-height: 27px; display: flex; align-items: center; padding: 4px 7px; border-bottom: 1px solid #d3d7da; }
+.topology-grid > span { border-right: 1px solid #c0c7ca; background: #e5e9eb; color: #556168; }.topology-grid > b { background: white; font-weight: 500; }
+@media (max-width: 900px) { .geometry-workspace { grid-template-columns: 225px minmax(0, 1fr); } .geometry-tool { min-width: 34px; padding-inline: 3px; } }
