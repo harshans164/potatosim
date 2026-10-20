@@ -22,7 +22,7 @@ export default function GeometryWindow() {
   const { document, selection, commit, replace, undo, redo } = store;
   const [mode, setMode] = useState<SidebarMode>("modeling");
   const [tool, setTool] = useState<EditorTool>("select");
-  const [view, setView] = useState<ViewState>({ zoom: 1, pan: { x: 0, y: 0 } });
+  const [view, setView] = useState<ViewState>({ zoom: 1, pan: { x: 0, y: 0 }, azimuth: 45, elevation: 35.264 });
   const [status, setStatus] = useState("Ready");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const projectInput = useRef<HTMLInputElement>(null);
@@ -57,18 +57,57 @@ export default function GeometryWindow() {
   const resetModel = () => {
     if ((document.entities.length || document.sketches.length) && !window.confirm("Create a new geometry model? Unsaved sketch data will be cleared.")) return;
     replace({ ...document, sketches: [], entities: [], dimensions: [], activePlaneId: "xy-plane", activeSketchId: null });
-    setView({ zoom: 1, pan: { x: 0, y: 0 } }); setMode("modeling"); setTool("select"); setActiveMenu(null); notify("New geometry model");
+    setView({ zoom: 1, pan: { x: 0, y: 0 }, azimuth: 45, elevation: 35.264 }); setMode("modeling"); setTool("select"); setActiveMenu(null); notify("New geometry model");
   };
 
   const addEntity = (source: SketchEntity) => {
-    if (!document.activeSketchId) return;
+    let targetSketchId = document.activeSketchId;
+    let extraCommit: ((curr: SketchDocument) => SketchDocument) | null = null;
+    if (!targetSketchId) {
+      const created = makeSketch(document);
+      targetSketchId = created.id;
+      extraCommit = curr => ({ ...curr, sketches: [...curr.sketches, created.sketch], activeSketchId: created.id });
+    }
+    const sid = targetSketchId;
     const nextId = source.id;
     const nextName = `${entityLabel(source.type)}${document.entities.filter(entity => entity.type === source.type).length + 1}`;
     commit(current => {
-      const entity = { ...source, id: nextId, name: nextName, sketchId: current.activeSketchId!, valid: entityIsValid(source) };
-      return { ...current, entities: [...current.entities, entity], sketches: current.sketches.map(sketch => sketch.id === current.activeSketchId ? { ...sketch, entityIds: [...sketch.entityIds, entity.id], generated: false } : sketch) };
+      const baseDoc = extraCommit ? extraCommit(current) : current;
+      const entity = { ...source, id: nextId, name: nextName, sketchId: sid, valid: entityIsValid(source) };
+      return { ...baseDoc, entities: [...baseDoc.entities, entity], sketches: baseDoc.sketches.map(sketch => sketch.id === sid ? { ...sketch, entityIds: [...sketch.entityIds, entity.id], generated: false } : sketch) };
     });
     store.setSelection({ kind: "entity", ids: [nextId] }); notify(`${nextName} created`);
+  };
+
+  const addEntities = (sources: SketchEntity[]) => {
+    if (!sources.length) return;
+    let targetSketchId = document.activeSketchId;
+    let extraCommit: ((curr: SketchDocument) => SketchDocument) | null = null;
+    if (!targetSketchId) {
+      const created = makeSketch(document);
+      targetSketchId = created.id;
+      extraCommit = curr => ({ ...curr, sketches: [...curr.sketches, created.sketch], activeSketchId: created.id });
+    }
+    const sid = targetSketchId;
+    commit(current => {
+      const baseDoc = extraCommit ? extraCommit(current) : current;
+      const count = baseDoc.entities.filter(entity => entity.type === sources[0].type).length;
+      const newEntities = sources.map((s, idx) => ({
+        ...s,
+        id: s.id,
+        name: `${entityLabel(s.type)}${count + idx + 1}`,
+        sketchId: sid,
+        valid: entityIsValid(s),
+      }));
+      const newIds = newEntities.map(e => e.id);
+      return {
+        ...baseDoc,
+        entities: [...baseDoc.entities, ...newEntities],
+        sketches: baseDoc.sketches.map(sk => sk.id === sid ? { ...sk, entityIds: [...sk.entityIds, ...newIds], generated: false } : sk),
+      };
+    });
+    store.setSelection({ kind: "entity", ids: [sources[0].id] });
+    notify(`${sources.length} components created`);
   };
 
   const updateEntity = (id: string, updater: (entity: SketchEntity) => SketchEntity) => commit(current => ({
@@ -90,12 +129,18 @@ export default function GeometryWindow() {
     const plane = document.planes.find(item => item.id === id); if (!plane) return;
     const sketch = [...document.sketches].reverse().find(item => item.planeId === id);
     commit(current => ({ ...current, activePlaneId: id, activeSketchId: sketch?.id ?? null }));
-    store.setSelection({ kind: "plane", ids: [id] }); setMode("modeling"); setTool("select"); setView({ zoom: 1, pan: { x: 0, y: 0 } }); notify(`Looking normal to ${plane.name}`);
+    store.setSelection({ kind: "plane", ids: [id] }); setMode("modeling"); setTool("select");
+    const angles = id === "xy-plane" ? { azimuth: 0, elevation: 0 }
+                 : id === "yz-plane" ? { azimuth: 90, elevation: 0 }
+                 : { azimuth: 0, elevation: 90 };
+    setView({ zoom: 1, pan: { x: 0, y: 0 }, ...angles });
+    notify(`Looking normal to ${plane.name}`);
   };
 
   const addDimension = (requested: DimensionKind, entityId: string) => {
-    if (!document.activeSketchId) return;
     const entity = document.entities.find(item => item.id === entityId); if (!entity) return;
+    const targetSketchId = document.activeSketchId ?? entity.sketchId;
+    if (!targetSketchId) return;
     let entityIds = [entityId];
     if (requested === "angle") {
       const firstId = selection.kind === "entity" ? selection.ids.find(id => id !== entityId && document.entities.find(item => item.id === id)?.type === "line") : undefined;
@@ -104,7 +149,8 @@ export default function GeometryWindow() {
     }
     const kind = dimensionKindForEntity(requested, entity); if (!kind) { notify(`${requested} dimension is not supported for ${entity.type}`); return; }
     const id = uid("dimension"), count = document.dimensions.length + 1;
-    const dimension: SketchDimension = { id, name: `Dimension${count}`, sketchId: document.activeSketchId, kind, entityIds, offset: { x: 0.02, y: 0.02 }, visible: true };
+    const offset = kind === "vertical" ? { x: -0.025, y: 0 } : kind === "horizontal" ? { x: 0, y: 0.02 } : { x: 0.02, y: 0.02 };
+    const dimension: SketchDimension = { id, name: `Dimension${count}`, sketchId: targetSketchId, kind, entityIds, offset, visible: true };
     commit(current => ({ ...current, dimensions: [...current.dimensions, dimension], sketches: current.sketches.map(sketch => sketch.id === dimension.sketchId ? { ...sketch, generated: false } : sketch) }));
     store.setSelection({ kind: "dimension", ids: [id] }); notify(`${kind} dimension created`);
   };
@@ -201,7 +247,7 @@ export default function GeometryWindow() {
     try {
       const data = JSON.parse(await file.text()) as Partial<SketchProjectFile>;
       if (data.format !== "simwhere-geometry" || data.version !== 2 || !isSketchDocument(data.document)) throw new Error("Invalid document schema");
-      replace(data.document); setView(validView(data.view) ? data.view! : { zoom: 1, pan: { x: 0, y: 0 } }); setMode("modeling"); setTool("select"); notify(`${file.name} opened`);
+      replace(data.document); setView(validView(data.view) ? { azimuth: 45, elevation: 35.264, ...data.view } : { zoom: 1, pan: { x: 0, y: 0 }, azimuth: 45, elevation: 35.264 }); setMode("modeling"); setTool("select"); notify(`${file.name} opened`);
     } catch { notify("The selected file is not a valid Simwhere geometry project"); }
   };
 
@@ -226,7 +272,7 @@ export default function GeometryWindow() {
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); save(); }
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") { event.preventDefault(); store.setSelection({ kind: "entity", ids: visibleEntities.map(entity => entity.id) }); }
-      else if (event.key === "Delete") deleteSelection();
+      else if (event.key === "Delete" || event.key === "Backspace") deleteSelection();
       else if (event.key === "Escape") { setTool("select"); setActiveMenu(null); }
     };
     window.addEventListener("keydown", keydown); return () => window.removeEventListener("keydown", keydown);
@@ -235,12 +281,12 @@ export default function GeometryWindow() {
   return <div className="geometry-app" onPointerDown={() => activeMenu && setActiveMenu(null)}>
     <header className="geometry-menubar"><div className="geometry-appmark">SW</div>{["File", "Edit", "View", "Create", "Concept", "Tools", "Units", "Help"].map(label => <div className="geometry-menu-root" key={label} onPointerDown={event => event.stopPropagation()}>
       <button className={activeMenu === label ? "active" : ""} onClick={() => setActiveMenu(activeMenu === label ? null : label)}>{label}</button>
-      {activeMenu === label && <GeometryMenu label={label} document={document} onNew={resetModel} onOpen={() => projectInput.current?.click()} onSave={save} onUndo={undo} onRedo={redo} onSelectAll={() => store.setSelection({ kind: "entity", ids: visibleEntities.map(entity => entity.id) })} onDeselect={() => store.setSelection({ kind: "sketch", ids: document.activeSketchId ? [document.activeSketchId] : [] })} onSketch={newSketch} onTool={ensureSketchAndSetTool} onFit={fitView} onUnits={(length, angle) => commit(current => ({ ...current, units: { ...current.units, ...(length ? { length } : {}), ...(angle ? { angle } : {}) } }))} onNotify={notify}/>}
+      {activeMenu === label && <GeometryMenu label={label} document={document} onNew={resetModel} onOpen={() => projectInput.current?.click()} onSave={save} onUndo={undo} onRedo={redo} onSelectAll={() => store.setSelection({ kind: "entity", ids: visibleEntities.map(entity => entity.id) })} onDeselect={() => store.setSelection({ kind: "sketch", ids: document.activeSketchId ? [document.activeSketchId] : [] })} onSketch={newSketch} onTool={ensureSketchAndSetTool} onFit={fitView} onIsometric={() => setView(current => ({ ...current, azimuth: 45, elevation: 35.264, zoom: 1, pan: { x: 0, y: 0 } }))} onUnits={(length, angle) => commit(current => ({ ...current, units: { ...current.units, ...(length ? { length } : {}), ...(angle ? { angle } : {}) } }))} onNotify={notify}/>}
     </div>)}<span className="geometry-title">Geometry - 2D Sketcher</span></header>
     <div className="geometry-main-toolbar">
       <ToolbarButton icon="new" label="New" onClick={resetModel}/><ToolbarButton icon="open" label="Open" onClick={() => projectInput.current?.click()}/><ToolbarButton icon="save" label="Save" onClick={save}/><span className="toolbar-rule"/>
       <ToolbarButton icon="undo" label="Undo" disabled={!store.canUndo} onClick={undo}/><ToolbarButton icon="redo" label="Redo" disabled={!store.canRedo} onClick={redo}/><span className="toolbar-rule"/>
-      <ToolbarButton icon="select" label="Select" active={tool === "select"} onClick={() => setTool("select")}/><ToolbarButton icon="pan" label="Pan" active={tool === "pan"} onClick={() => setTool("pan")}/><ToolbarButton icon="fit" label="Fit" onClick={fitView}/><span className="toolbar-rule"/>
+      <ToolbarButton icon="select" label="Select" active={tool === "select"} onClick={() => setTool("select")}/><ToolbarButton icon="pan" label="Pan" active={tool === "pan"} onClick={() => setTool("pan")}/><ToolbarButton icon="fit" label="Fit" onClick={fitView}/><ToolbarButton icon="isometric" label="Isometric View" onClick={() => setView(current => ({ ...current, azimuth: 45, elevation: 35.264, zoom: 1, pan: { x: 0, y: 0 } }))}/><span className="toolbar-rule"/>
       <button className="geometry-tool text-tool" title="Zoom out" onClick={() => setView(current => ({ ...current, zoom: Math.max(.1, current.zoom / 1.25) }))}>−</button><button className="geometry-tool text-tool" title="Zoom in" onClick={() => setView(current => ({ ...current, zoom: Math.min(20, current.zoom * 1.25) }))}>+</button>
       <span className="toolbar-fill"/><span className="toolbar-readout">{activePlane.name}</span>
     </div>
@@ -255,7 +301,7 @@ export default function GeometryWindow() {
     </div>
     <div className="geometry-workspace">
       <SketchSidebar document={document} mode={mode} activeTool={tool} selection={selection} onModeChange={setMode} onToolChange={ensureSketchAndSetTool} onSelect={next => { store.setSelection(next); if (next.kind === "sketch") { const sketch = document.sketches.find(item => item.id === next.ids[0]); if (sketch) commit(current => ({ ...current, activePlaneId: sketch.planeId, activeSketchId: sketch.id })); } }} onLookAtPlane={lookAtPlane} onRenamePlane={(id, name) => rename("plane", id, name)} onNewSketch={newSketch} onGenerate={generate} onToggleVisibility={toggleVisibility} onRename={rename} onUpdateEntity={updateEntity} onUpdateDimensionValue={updateDimensionValue} onModify={modify} onDisplayChange={changes => commit(current => ({ ...current, display: { ...current.display, ...changes } }))} onUnitSettingsChange={changes => commit(current => ({ ...current, units: { ...current.units, ...changes } }))}/>
-      <SketchViewport document={document} entities={visibleEntities} dimensions={visibleDimensions} activePlane={activePlane} activeTool={tool} selectedIds={selection.ids} selectionKind={selection.kind} view={view} onViewChange={setView} onSelectEntity={selectEntity} onSelectDimension={id => store.setSelection({ kind: "dimension", ids: [id] })} onClearSelection={() => store.setSelection({ kind: activeSketch ? "sketch" : "plane", ids: [activeSketch?.id ?? activePlane.id] })} onAddEntity={addEntity} onMoveEntities={moveEntities} onAddDimension={addDimension} onMoveDimension={(id, offset) => commit(current => ({ ...current, dimensions: current.dimensions.map(item => item.id === id ? { ...item, offset } : item) }))} onStatus={setStatus} onToolCancel={() => setTool("select")}/>
+      <SketchViewport document={document} entities={visibleEntities} dimensions={visibleDimensions} activePlane={activePlane} activeTool={tool} selectedIds={selection.ids} selectionKind={selection.kind} view={view} onViewChange={setView} onSelectEntity={selectEntity} onSelectDimension={id => store.setSelection({ kind: "dimension", ids: [id] })} onClearSelection={() => store.setSelection({ kind: activeSketch ? "sketch" : "plane", ids: [activeSketch?.id ?? activePlane.id] })} onAddEntity={addEntity} onAddEntities={addEntities} onMoveEntities={moveEntities} onAddDimension={addDimension} onMoveDimension={(id, offset) => commit(current => ({ ...current, dimensions: current.dimensions.map(item => item.id === id ? { ...item, offset } : item) }))} onStatus={setStatus} onToolCancel={() => setTool("select")}/>
     </div>
     <footer className="geometry-status"><span>Geometry</span><span className="geometry-status-main"><i className={status === "Ready" ? "ready" : "working"}/>{status}</span><span>{activePlane.name} Plane</span><span>{Math.round(view.zoom * 100)}%</span><span>{document.units.length} · {document.units.angle === "deg" ? "Degree" : "Radian"}</span><span>{visibleEntities.length} entities</span></footer>
     <input ref={projectInput} type="file" accept=".json,.clgeo" hidden onChange={open}/>
@@ -264,12 +310,12 @@ export default function GeometryWindow() {
 
 function ToolbarButton({ icon, label, active, disabled, onClick }: { icon: CadIconName; label: string; active?: boolean; disabled?: boolean; onClick: () => void }) { return <button className={`geometry-tool ${active ? "active" : ""}`} title={label} aria-label={label} disabled={disabled} onClick={onClick}><CadIcon name={icon}/></button>; }
 
-function GeometryMenu({ label, document, onNew, onOpen, onSave, onUndo, onRedo, onSelectAll, onDeselect, onSketch, onTool, onFit, onUnits, onNotify }: { label: string; document: SketchDocument; onNew: () => void; onOpen: () => void; onSave: () => void; onUndo: () => void; onRedo: () => void; onSelectAll: () => void; onDeselect: () => void; onSketch: () => void; onTool: (tool: EditorTool) => void; onFit: () => void; onUnits: (length?: LengthUnit, angle?: "deg" | "rad") => void; onNotify: (message: string) => void }) {
+function GeometryMenu({ label, document, onNew, onOpen, onSave, onUndo, onRedo, onSelectAll, onDeselect, onSketch, onTool, onFit, onIsometric, onUnits, onNotify }: { label: string; document: SketchDocument; onNew: () => void; onOpen: () => void; onSave: () => void; onUndo: () => void; onRedo: () => void; onSelectAll: () => void; onDeselect: () => void; onSketch: () => void; onTool: (tool: EditorTool) => void; onFit: () => void; onIsometric: () => void; onUnits: (length?: LengthUnit, angle?: "deg" | "rad") => void; onNotify: (message: string) => void }) {
   const item = (text: string, action: () => void, shortcut = "", active = false, disabled = false) => <button disabled={disabled} className={active ? "checked" : ""} onClick={action}><span>{active ? "✓ " : ""}{text}</span><kbd>{shortcut}</kbd></button>;
   return <div className="geometry-dropdown">
     {label === "File" && <>{item("New Model", onNew, "Ctrl+N")}{item("Open Geometry...", onOpen, "Ctrl+O")}{item("Save Geometry", onSave, "Ctrl+S")}</>}
     {label === "Edit" && <>{item("Undo", onUndo, "Ctrl+Z")}{item("Redo", onRedo, "Ctrl+Y")}<hr/>{item("Select All", onSelectAll, "Ctrl+A")}{item("Deselect", onDeselect, "Esc")}</>}
-    {label === "View" && <>{item("Fit", onFit, "F")}{item("Show Grid", () => onNotify("Use Sketching > Settings to configure the grid"), "", document.display.grid)}</>}
+    {label === "View" && <>{item("Fit", onFit, "F")}{item("Isometric View", onIsometric, "Home")}{item("Show Grid", () => onNotify("Use Sketching > Settings to configure the grid"), "", document.display.grid)}</>}
     {label === "Create" && <>{item("New Sketch", onSketch)}{item("Line", () => onTool("line"))}{item("Polyline", () => onTool("polyline"))}{item("Rectangle", () => onTool("rectangle"))}{item("Circle", () => onTool("circle"))}</>}
     {label === "Concept" && <>{item("3D Concepts", () => onNotify("3D feature creation is intentionally disabled in this 2D sketching stage"), "", false, true)}</>}
     {label === "Tools" && <>{item("Move", () => onTool("move"))}{item("General Dimension", () => onTool("dimGeneral"))}{item("Move Dimension", () => onTool("dimMove"))}</>}

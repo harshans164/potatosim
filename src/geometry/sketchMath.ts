@@ -1,4 +1,4 @@
-import type { AngleUnit, DimensionKind, LengthUnit, Point2, RectangleEntity, SketchDimension, SketchDocument, SketchEntity, UnitSettings } from "../types/sketch";
+import type { AngleUnit, DimensionKind, LengthUnit, Point2, RectangleEntity, SketchDimension, SketchDocument, SketchEntity, UnitSettings, ViewState } from "../types/sketch";
 
 const LENGTH_FACTORS: Record<LengthUnit, number> = { m: 1, mm: 0.001, cm: 0.01, in: 0.0254, ft: 0.3048 };
 export const MODEL_TO_VIEW = 1000;
@@ -181,7 +181,14 @@ export const formatDimension = (dimension: SketchDimension, document: SketchDocu
 export const dimensionKindForEntity = (requested: DimensionKind, entity: SketchEntity): DimensionKind | null => {
   if (requested === "general") {
     if (entity.type === "circle" || entity.type === "arc") return "diameter";
-    if (entity.type === "line" || entity.type === "rectangle") return "length";
+    if (entity.type === "line") {
+      const dx = Math.abs(entity.end.x - entity.start.x);
+      const dy = Math.abs(entity.end.y - entity.start.y);
+      if (dx < dy * 0.25) return "vertical";
+      if (dy < dx * 0.25) return "horizontal";
+      return "length";
+    }
+    if (entity.type === "rectangle") return "length";
     return null;
   }
   if ((requested === "radius" || requested === "diameter") && entity.type !== "circle" && entity.type !== "arc") return null;
@@ -192,14 +199,81 @@ export const dimensionKindForEntity = (requested: DimensionKind, entity: SketchE
 export const createInitialDocument = (): SketchDocument => ({
   version: 2,
   planes: [
-    { id: "xy-plane", name: "XYPlane", kind: "xy", visible: true },
-    { id: "yz-plane", name: "YZPlane", kind: "yz", visible: true },
-    { id: "zx-plane", name: "ZXPlane", kind: "zx", visible: true },
+    { id: "xy-plane", name: "XYPlane", kind: "xy", visible: false },
+    { id: "yz-plane", name: "YZPlane", kind: "yz", visible: false },
+    { id: "zx-plane", name: "ZXPlane", kind: "zx", visible: false },
   ],
   sketches: [], entities: [], dimensions: [], activePlaneId: "xy-plane", activeSketchId: null,
   units: { length: "mm", angle: "deg", precision: 2, showUnitSuffix: true },
   display: { grid: false, snap: true, gridSize: 0.01, polygonSides: 6 },
 });
+
+export const project3DToScreen = (
+  x: number, y: number, z: number,
+  view: ViewState
+): Point2 => {
+  const azimuth = (view.azimuth ?? 45) * Math.PI / 180;
+  const elevation = (view.elevation ?? 35.264) * Math.PI / 180;
+  const x1 = x * Math.cos(azimuth) - z * Math.sin(azimuth);
+  const z1 = x * Math.sin(azimuth) + z * Math.cos(azimuth);
+  const y1 = y;
+  const x2 = x1;
+  const y2 = y1 * Math.cos(elevation) - z1 * Math.sin(elevation);
+  const S = MODEL_TO_VIEW * view.zoom;
+  return {
+    x: x2 * S + view.pan.x,
+    y: -y2 * S + view.pan.y,
+  };
+};
+
+export const projectPlaneToScreen = (
+  point: Point2,
+  planeKind: "xy" | "yz" | "zx",
+  view: ViewState
+): Point2 => {
+  const x = planeKind === "xy" ? point.x : planeKind === "zx" ? point.y : 0;
+  const y = planeKind === "xy" ? point.y : planeKind === "yz" ? point.x : 0;
+  const z = planeKind === "yz" ? point.y : planeKind === "zx" ? point.x : 0;
+  return project3DToScreen(x, y, z, view);
+};
+
+export const unprojectScreenToPlane = (
+  screenPoint: Point2,
+  planeKind: "xy" | "yz" | "zx",
+  view: ViewState
+): Point2 => {
+  const azimuth = (view.azimuth ?? 45) * Math.PI / 180;
+  const elevation = (view.elevation ?? 35.264) * Math.PI / 180;
+  const S = MODEL_TO_VIEW * view.zoom;
+  const x2 = (screenPoint.x - view.pan.x) / S;
+  const y2 = -(screenPoint.y - view.pan.y) / S;
+
+  const y1 = y2 * Math.cos(elevation);
+  const z1 = -y2 * Math.sin(elevation);
+  const x0 = x2 * Math.cos(azimuth) + z1 * Math.sin(azimuth);
+  const y0 = y1;
+  const z0 = -x2 * Math.sin(azimuth) + z1 * Math.cos(azimuth);
+
+  const dy1 = Math.sin(elevation);
+  const dz1 = Math.cos(elevation);
+  const dx = dz1 * Math.sin(azimuth);
+  const dy = -dy1;
+  const dz = dz1 * Math.cos(azimuth);
+
+  if (planeKind === "xy") {
+    if (Math.abs(dz) < 1e-6) return { x: x0, y: y0 };
+    const t = -z0 / dz;
+    return { x: x0 + t * dx, y: y0 + t * dy };
+  }
+  if (planeKind === "yz") {
+    if (Math.abs(dx) < 1e-6) return { x: y0, y: z0 };
+    const t = -x0 / dx;
+    return { x: y0 + t * dy, y: z0 + t * dz };
+  }
+  if (Math.abs(dy) < 1e-6) return { x: z0, y: x0 };
+  const t = -y0 / dy;
+  return { x: z0 + t * dz, y: x0 + t * dx };
+};
 
 export const isSketchDocument = (value: unknown): value is SketchDocument => {
   if (!value || typeof value !== "object") return false;

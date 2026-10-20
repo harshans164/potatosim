@@ -1,4 +1,4 @@
-export type CadIconName = "new" | "open" | "save" | "import" | "export" | "select" | "pan" | "fit" | "sketch" | "extrude" | "boolean" | "validate" | "line" | "rectangle" | "circle" | "horizontal" | "vertical" | "coincident" | "equal" | "dimension" | "box" | "cylinder" | "sphere" | "generate" | "undo" | "redo" | "parameters";
+export type CadIconName = "new" | "open" | "save" | "import" | "export" | "select" | "pan" | "fit" | "isometric" | "sketch" | "extrude" | "boolean" | "validate" | "line" | "rectangle" | "circle" | "horizontal" | "vertical" | "coincident" | "equal" | "dimension" | "box" | "cylinder" | "sphere" | "generate" | "undo" | "redo" | "parameters";
 
 export function CadIcon({ name, size = 16 }: { name: CadIconName; size?: number }) {
   const paths: Record<CadIconName, React.ReactNode> = {
@@ -8,6 +8,7 @@ export function CadIcon({ name, size = 16 }: { name: CadIconName; size?: number 
     import: <><path d="M4 20h16v-6M12 3v12M7 10l5 5 5-5"/></>, export: <><path d="M4 20h16v-6M12 16V4M7 9l5-5 5 5"/></>,
     select: <path d="M5 3l12 9-6 1 3 6-3 2-3-6-4 4z"/>, pan: <><path d="M8 11V6a2 2 0 014 0v5M12 10V5a2 2 0 014 0v7M16 10V7a2 2 0 014 0v8c0 4-3 7-7 7h-2c-3 0-5-2-6-5l-1-4a2 2 0 014-1l1 2V8a2 2 0 014 0v4"/></>,
     fit: <><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><circle cx="12" cy="12" r="3"/></>,
+    isometric: <><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9z"/><path d="M12 2v9l8 4.5M12 11L4 6.5"/></>,
     sketch: <><path d="M4 20l4-1 11-11-3-3L5 16zM14 7l3 3"/><path d="M3 3h7M3 3v7"/></>,
     extrude: <><path d="M4 10l7-4 7 4-7 4zM4 10v7l7 4 7-4v-7M11 14v7"/><path d="M20 4v8M17 7l3-3 3 3"/></>,
     boolean: <><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 7a6 6 0 010 10"/></>,

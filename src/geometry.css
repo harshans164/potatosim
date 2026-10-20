@@ -230,13 +230,22 @@ button, input { font: inherit; color: inherit; }
 .sketch-svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: default; }.sketch-svg.tool-pan { cursor: grab; }.sketch-svg.tool-line, .sketch-svg.tool-polyline, .sketch-svg.tool-rectangle, .sketch-svg.tool-rectangle3, .sketch-svg.tool-polygon, .sketch-svg.tool-circle, .sketch-svg.tool-arc3, .sketch-svg.tool-arcCenter, .sketch-svg.tool-ellipse, .sketch-svg[class*="tool-dim"] { cursor: crosshair; }.sketch-svg.tool-move { cursor: move; }
 .sketch-main-axes line { stroke: #23344a; stroke-width: 1; stroke-dasharray: 3 3; opacity: .85; vector-effect: non-scaling-stroke; pointer-events: none; }
 .sketch-main-axes circle { fill: #111a2e; }.sketch-main-axes path { fill: none; stroke-width: 3; pointer-events: none; }.sketch-main-axes .axis-positive-x { stroke: #bd1620; }.sketch-main-axes .axis-positive-y { stroke: #168829; }
-.sketch-entity { fill: none; stroke: #16777e; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.sketch-entity:hover, .sketch-entity.selected { stroke: #f1b000; stroke-width: 2.3; }.sketch-entity.invalid { stroke: #ca2923; stroke-dasharray: 4 3; }
+.tree-row.plane-row { padding-left: 14px; font-weight: 500; }
+.tree-row.plane-row .plane-icon { margin-right: 2px; }
+
+.sketch-entity { fill: none; stroke: #1a3db8; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.sketch-entity:hover { stroke: #0077c8; stroke-width: 2.2; }
+.sketch-entity.selected { stroke: #ff8c00; stroke-width: 2.5; }
+.sketch-entity.invalid { stroke: #ca2923; stroke-dasharray: 4 3; }
 .entity-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; vector-effect: non-scaling-stroke; cursor: pointer; }
 .sketch-preview { fill: none; stroke: #e17313; stroke-width: 1.5; stroke-dasharray: 5 3; pointer-events: none; vector-effect: non-scaling-stroke; }
 .construction-point { fill: white; stroke: #df7510; stroke-width: 1.5; pointer-events: none; }
 .snap-marker { pointer-events: none; }.snap-marker rect { fill: none; stroke: #e25310; stroke-width: 1.5; }.snap-marker text { fill: #25394b; font-size: 9px; paint-order: stroke; stroke: #e9f1ff; stroke-width: 3px; }
-.sketch-dimension { cursor: move; }.sketch-dimension line { stroke: #566b32; stroke-width: 1; }.sketch-dimension circle { fill: #566b32; }.sketch-dimension rect { fill: #f5f8e5dd; stroke: #72834e; stroke-width: .7; }.sketch-dimension text { fill: #26331c; font-size: 10px; text-anchor: middle; }.sketch-dimension.selected line, .sketch-dimension.selected circle { stroke: #ed8300; fill: #ed8300; }.sketch-dimension.selected rect { stroke: #ed8300; }
+.sketch-dimension { cursor: move; }
+.sketch-dimension line, .sketch-dimension path { vector-effect: non-scaling-stroke; }
+.sketch-dimension text { user-select: none; font-size: 10px; }
+.sketch-dimension:hover line, .sketch-dimension:hover path { stroke: #e58500 !important; }
+.sketch-dimension:hover text { fill: #e58500 !important; }
 .sketch-graphics .viewport-brand { top: 38px; }
 .viewport-scale { width: 280px; position: absolute; left: 50%; bottom: 29px; transform: translateX(-50%); color: #26313c; font-size: 9px; pointer-events: none; }.viewport-scale > span:first-child { float: left; }.viewport-scale > span:nth-child(2) { float: right; }.viewport-scale > div { height: 10px; clear: both; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #273039; }.viewport-scale i:nth-child(odd) { background: #050505; }.viewport-scale i:nth-child(even) { background: white; }
 .viewport-triad { width: 62px; height: 58px; position: absolute; right: 20px; bottom: 31px; pointer-events: none; }.viewport-triad i { position: absolute; left: 23px; bottom: 16px; width: 35px; border-top: 2px solid #d2232a; transform-origin: left; }.viewport-triad .triad-y { border-color: #269044; transform: rotate(-90deg); }.viewport-triad b, .viewport-triad em { position: absolute; font-size: 9px; font-style: normal; }.viewport-triad b { left: 18px; top: 0; color: #198238; }.viewport-triad em { right: 0; bottom: 11px; color: #c22129; }.viewport-triad span { position: absolute; left: 19px; bottom: 11px; color: #152aaa; }

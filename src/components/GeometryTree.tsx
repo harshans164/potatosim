@@ -37,7 +37,6 @@ export function GeometryTree({ features, selectedId, onSelect, onVisibility, onC
         <label><span>Suppressed</span><output>{selected.visible ? "No" : "Yes"}</output></label>
         {Object.entries(selected.params).map(([name, value]) => <label key={name}><span>{formatLabel(name)}</span><input type="number" min="0.1" step="1" value={value} onChange={event => onChange(selected.id, { params: { ...selected.params, [name]: Math.max(.1, Number(event.target.value)) } })}/></label>)}
         {selected.type === "sketch" && <label><span>Entities</span><output>{selected.entities?.length ?? 0}</output></label>}
-        {selected.type === "sketch" && <label><span>Constraints</span><output>{selected.constraints?.length ?? 0}</output></label>}
         {selected.type === "boolean" && <label><span>Operation</span><output>{selected.operation}</output></label>}
         <div className="details-section">Information</div>
         <label><span>Status</span><output className={selected.generated ? "generated" : "pending"}>{selected.generated ? "Generated" : "Requires Generate"}</output></label>
@@ -47,10 +46,11 @@ export function GeometryTree({ features, selectedId, onSelect, onVisibility, onC
 }
 
 function TreeItem({ feature, selected, depth, onSelect, onVisibility }: { feature: GeometryFeature; selected: boolean; depth: number; onSelect: (id: string) => void; onVisibility: (id: string) => void }) {
-  return <div className={`tree-node item ${selected ? "selected" : ""}`} style={{ paddingLeft: depth * 14 + 4 }} onClick={() => onSelect(feature.id)}>
-    <button className={`visibility ${feature.visible ? "visible" : ""}`} title={feature.visible ? "Hide" : "Show"} onClick={event => { event.stopPropagation(); onVisibility(feature.id); }}>{feature.visible ? "◉" : "○"}</button>
+  const isPlane = feature.type === "plane";
+  return <div className={`tree-node item ${selected ? "selected" : ""}`} style={{ paddingLeft: isPlane ? 18 : depth * 14 + 4 }} onClick={() => onSelect(feature.id)}>
+    {!isPlane && <button className={`visibility ${feature.visible ? "visible" : ""}`} title={feature.visible ? "Hide" : "Show"} onClick={event => { event.stopPropagation(); onVisibility(feature.id); }}>{feature.visible ? "◉" : "○"}</button>}
     <span className={`feature-glyph ${feature.type}`}>{featureGlyph[feature.type]}</span><span className="tree-label">{feature.name}</span>
-    <span className={feature.generated ? "tree-state ok" : "tree-state pending"}>{feature.generated ? "✓" : "⚡"}</span>
+    {!isPlane && <span className={feature.generated ? "tree-state ok" : "tree-state pending"}>{feature.generated ? "✓" : "⚡"}</span>}
   </div>;
 }
 

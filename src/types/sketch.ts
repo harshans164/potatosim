@@ -131,6 +131,8 @@ export interface SketchProjectFile {
 export interface ViewState {
   zoom: number;
   pan: Point2;
+  azimuth?: number;
+  elevation?: number;
 }
 
 export type DrawTool = "line" | "polyline" | "rectangle" | "rectangle3" | "polygon" | "circle" | "arc3" | "arcCenter" | "ellipse";
