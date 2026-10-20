@@ -301,3 +301,121 @@ export const setDimensionValue = (dimension: SketchDimension, document: SketchDo
   }
   return null;
 };
+
+export const exportSketchToStep = (document: SketchDocument, modelName = "Simwhere_CAD_Model"): string => {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+  let id = 1;
+  const nextId = () => id++;
+
+  const lines: string[] = [];
+  const addEntry = (content: string) => {
+    const curId = nextId();
+    lines.push(`#${curId} = ${content};`);
+    return curId;
+  };
+
+  const header = `ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Simwhere CAD Model (2D/3D Wireframe STEP export)'), '2;1');
+FILE_NAME('${modelName}.step', '${timestamp}', ('Simwhere User'), ('Simwhere'), 'Simwhere CAD Kernel 1.0', 'Simwhere', '');
+FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;`;
+
+  // Standard coordinate system entities
+  const originId = addEntry("CARTESIAN_POINT('', (0., 0., 0.))");
+  const dirZId = addEntry("DIRECTION('', (0., 0., 1.))");
+  const dirXId = addEntry("DIRECTION('', (1., 0., 0.))");
+  const axis2PlacementId = addEntry(`AXIS2_PLACEMENT_3D('', #${originId}, #${dirZId}, #${dirXId})`);
+
+  // Transform 2D sketch plane entity to 3D world coordinates
+  const toWorld3D = (pt: Point2, planeId: string): [number, number, number] => {
+    const plane = document.planes.find(p => p.id === planeId);
+    const kind = plane?.kind ?? "xy";
+    if (kind === "xy") return [pt.x, pt.y, 0];
+    if (kind === "yz") return [0, pt.x, pt.y];
+    // zx plane
+    return [pt.y, 0, pt.x];
+  };
+
+  const curveIds: number[] = [];
+
+  for (const entity of document.entities) {
+    if (!entity.visible) continue;
+    const sketch = document.sketches.find(s => s.id === entity.sketchId);
+    const planeId = sketch?.planeId ?? document.activePlaneId;
+
+    if (entity.type === "line") {
+      const [x1, y1, z1] = toWorld3D(entity.start, planeId);
+      const [x2, y2, z2] = toWorld3D(entity.end, planeId);
+      const pt1 = addEntry(`CARTESIAN_POINT('', (${x1}, ${y1}, ${z1}))`);
+      const pt2 = addEntry(`CARTESIAN_POINT('', (${x2}, ${y2}, ${z2}))`);
+      const vdx = x2 - x1, vdy = y2 - y1, vdz = z2 - z1;
+      const vlen = Math.hypot(vdx, vdy, vdz) || 1;
+      const dirId = addEntry(`DIRECTION('', (${vdx / vlen}, ${vdy / vlen}, ${vdz / vlen}))`);
+      const vecId = addEntry(`VECTOR('', #${dirId}, ${vlen})`);
+      const lineId = addEntry(`LINE('', #${pt1}, #${vecId})`);
+      const vertex1 = addEntry(`VERTEX_POINT('', #${pt1})`);
+      const vertex2 = addEntry(`VERTEX_POINT('', #${pt2})`);
+      const edgeCurve = addEntry(`EDGE_CURVE('', #${vertex1}, #${vertex2}, #${lineId}, .T.)`);
+      curveIds.push(edgeCurve);
+    } else if (entity.type === "rectangle") {
+      const pts = rectanglePoints(entity);
+      for (let i = 0; i < 4; i++) {
+        const [x1, y1, z1] = toWorld3D(pts[i], planeId);
+        const [x2, y2, z2] = toWorld3D(pts[(i + 1) % 4], planeId);
+        const pt1 = addEntry(`CARTESIAN_POINT('', (${x1}, ${y1}, ${z1}))`);
+        const pt2 = addEntry(`CARTESIAN_POINT('', (${x2}, ${y2}, ${z2}))`);
+        const vdx = x2 - x1, vdy = y2 - y1, vdz = z2 - z1;
+        const vlen = Math.hypot(vdx, vdy, vdz) || 1;
+        const dirId = addEntry(`DIRECTION('', (${vdx / vlen}, ${vdy / vlen}, ${vdz / vlen}))`);
+        const vecId = addEntry(`VECTOR('', #${dirId}, ${vlen})`);
+        const lineId = addEntry(`LINE('', #${pt1}, #${vecId})`);
+        const vertex1 = addEntry(`VERTEX_POINT('', #${pt1})`);
+        const vertex2 = addEntry(`VERTEX_POINT('', #${pt2})`);
+        const edgeCurve = addEntry(`EDGE_CURVE('', #${vertex1}, #${vertex2}, #${lineId}, .T.)`);
+        curveIds.push(edgeCurve);
+      }
+    } else if (entity.type === "circle") {
+      const [cx, cy, cz] = toWorld3D(entity.center, planeId);
+      const centerPt = addEntry(`CARTESIAN_POINT('', (${cx}, ${cy}, ${cz}))`);
+      const plane = document.planes.find(p => p.id === planeId);
+      const kind = plane?.kind ?? "xy";
+      const normal = kind === "xy" ? "(0., 0., 1.)" : kind === "yz" ? "(1., 0., 0.)" : "(0., 1., 0.)";
+      const refDir = kind === "xy" ? "(1., 0., 0.)" : kind === "yz" ? "(0., 1., 0.)" : "(0., 0., 1.)";
+      const normDirId = addEntry(`DIRECTION('', ${normal})`);
+      const refDirId = addEntry(`DIRECTION('', ${refDir})`);
+      const circPlacement = addEntry(`AXIS2_PLACEMENT_3D('', #${centerPt}, #${normDirId}, #${refDirId})`);
+      const circId = addEntry(`CIRCLE('', #${circPlacement}, ${entity.radius})`);
+      curveIds.push(circId);
+    } else if (entity.type === "polyline") {
+      const pts = entity.points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [x1, y1, z1] = toWorld3D(pts[i], planeId);
+        const [x2, y2, z2] = toWorld3D(pts[i + 1], planeId);
+        const pt1 = addEntry(`CARTESIAN_POINT('', (${x1}, ${y1}, ${z1}))`);
+        const pt2 = addEntry(`CARTESIAN_POINT('', (${x2}, ${y2}, ${z2}))`);
+        const vdx = x2 - x1, vdy = y2 - y1, vdz = z2 - z1;
+        const vlen = Math.hypot(vdx, vdy, vdz) || 1;
+        const dirId = addEntry(`DIRECTION('', (${vdx / vlen}, ${vdy / vlen}, ${vdz / vlen}))`);
+        const vecId = addEntry(`VECTOR('', #${dirId}, ${vlen})`);
+        const lineId = addEntry(`LINE('', #${pt1}, #${vecId})`);
+        const vertex1 = addEntry(`VERTEX_POINT('', #${pt1})`);
+        const vertex2 = addEntry(`VERTEX_POINT('', #${pt2})`);
+        const edgeCurve = addEntry(`EDGE_CURVE('', #${vertex1}, #${vertex2}, #${lineId}, .T.)`);
+        curveIds.push(edgeCurve);
+      }
+    }
+  }
+
+  // Model assembly entity
+  const curveRefs = curveIds.map(c => `#${c}`).join(", ");
+  const geometricSetId = addEntry(`GEOMETRIC_SET('${modelName}', (${curveRefs}))`);
+  const contextId = addEntry("GEOMETRIC_REPRESENTATION_CONTEXT(3)");
+  addEntry(`SHAPE_REPRESENTATION('${modelName}', (#${axis2PlacementId}, #${geometricSetId}), #${contextId})`);
+
+  const footer = `ENDSEC;
+END-ISO-10303-21;`;
+
+  return `${header}\n${lines.join("\n")}\n${footer}`;
+};

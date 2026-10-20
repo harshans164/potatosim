@@ -4,7 +4,7 @@ import { CadIcon, type CadIconName } from "./components/CadIcon";
 import { SketchSidebar } from "./components/SketchSidebar";
 import { SketchViewport } from "./components/SketchViewport";
 import {
-  EPSILON, dimensionKindForEntity, entityBounds, entityCenter, fromDisplayAngle, fromDisplayLength,
+  EPSILON, dimensionKindForEntity, entityBounds, entityCenter, exportSketchToStep, fromDisplayAngle, fromDisplayLength,
   isSketchDocument, lineIntersection, mirrorEntity, offsetEntity, rotateEntity, scaleEntity,
   setDimensionValue, translateEntity, uid,
 } from "./geometry/sketchMath";
@@ -25,6 +25,9 @@ export default function GeometryWindow() {
   const [view, setView] = useState<ViewState>({ zoom: 1, pan: { x: 0, y: 0 }, azimuth: 45, elevation: 35.264 });
   const [status, setStatus] = useState("Ready");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveFileName, setSaveFileName] = useState("model");
+  const [saveFileType, setSaveFileType] = useState<"step" | "json">("step");
   const projectInput = useRef<HTMLInputElement>(null);
 
   const activePlane = document.planes.find(plane => plane.id === document.activePlaneId) ?? document.planes[0];
@@ -131,7 +134,7 @@ export default function GeometryWindow() {
     commit(current => ({ ...current, activePlaneId: id, activeSketchId: sketch?.id ?? null }));
     store.setSelection({ kind: "plane", ids: [id] }); setMode("modeling"); setTool("select");
     const angles = id === "xy-plane" ? { azimuth: 0, elevation: 0 }
-                 : id === "yz-plane" ? { azimuth: 90, elevation: 0 }
+                 : id === "yz-plane" ? { azimuth: -90, elevation: 0 }
                  : { azimuth: 0, elevation: 90 };
     setView({ zoom: 1, pan: { x: 0, y: 0 }, ...angles });
     notify(`Looking normal to ${plane.name}`);
@@ -238,9 +241,36 @@ export default function GeometryWindow() {
   };
 
   const save = () => {
-    const file: SketchProjectFile = { format: "simwhere-geometry", version: 2, document, view };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
-    const anchor = globalThis.document.createElement("a"); anchor.href = url; anchor.download = "simwhere-geometry.clgeo.json"; anchor.click(); URL.revokeObjectURL(url); notify("Geometry project saved");
+    setActiveMenu(null);
+    setSaveModalOpen(true);
+  };
+
+  const handleConfirmSave = () => {
+    const rawName = saveFileName.trim() || "model";
+    const cleanName = rawName.replace(/\.(step|stp|json|clgeo)$/i, "");
+
+    if (saveFileType === "step") {
+      const stepContent = exportSketchToStep(document, cleanName);
+      const blob = new Blob([stepContent], { type: "application/step" });
+      const url = URL.createObjectURL(blob);
+      const anchor = globalThis.document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${cleanName}.step`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setSaveModalOpen(false);
+      notify(`Exported ${cleanName}.step (${document.entities.length} CAD entities)`);
+    } else {
+      const file: SketchProjectFile = { format: "simwhere-geometry", version: 2, document, view };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
+      const anchor = globalThis.document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${cleanName}.clgeo.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setSaveModalOpen(false);
+      notify(`Saved project ${cleanName}.clgeo.json`);
+    }
   };
   const open = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
@@ -305,6 +335,71 @@ export default function GeometryWindow() {
     </div>
     <footer className="geometry-status"><span>Geometry</span><span className="geometry-status-main"><i className={status === "Ready" ? "ready" : "working"}/>{status}</span><span>{activePlane.name} Plane</span><span>{Math.round(view.zoom * 100)}%</span><span>{document.units.length} · {document.units.angle === "deg" ? "Degree" : "Radian"}</span><span>{visibleEntities.length} entities</span></footer>
     <input ref={projectInput} type="file" accept=".json,.clgeo" hidden onChange={open}/>
+
+    {saveModalOpen && (
+      <div className="geometry-modal-backdrop" onClick={() => setSaveModalOpen(false)}>
+        <div className="cad-save-dialog" onClick={e => e.stopPropagation()}>
+          <div className="cad-save-header">
+            <span>Save CAD Geometry As</span>
+            <button className="cad-save-close" title="Close" onClick={() => setSaveModalOpen(false)}>✕</button>
+          </div>
+          <div className="cad-save-body">
+            <div className="cad-save-nav">
+              <span className="cad-save-nav-label">Save in:</span>
+              <div className="cad-save-nav-path">📁 Desktop &gt; Projects &gt; Simwhere CAD</div>
+            </div>
+            <div className="cad-save-list">
+              <div className="cad-save-file-item active">
+                <span className="cad-save-file-icon">📄</span>
+                <span className="cad-save-file-name">{saveFileName || "model"}.{saveFileType === "step" ? "step" : "clgeo.json"}</span>
+                <span className="cad-save-file-size">New File</span>
+              </div>
+              <div className="cad-save-file-item">
+                <span className="cad-save-file-icon">📐</span>
+                <span className="cad-save-file-name">bracket_assembly.step</span>
+                <span className="cad-save-file-size">24 KB</span>
+              </div>
+              <div className="cad-save-file-item">
+                <span className="cad-save-file-icon">📐</span>
+                <span className="cad-save-file-name">chassis_profile.step</span>
+                <span className="cad-save-file-size">18 KB</span>
+              </div>
+            </div>
+            <div className="cad-save-field">
+              <span>File name:</span>
+              <div className="cad-save-input-wrap">
+                <input
+                  type="text"
+                  value={saveFileName}
+                  autoFocus
+                  onChange={e => setSaveFileName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleConfirmSave(); }}
+                />
+                <span className="cad-save-ext">.{saveFileType === "step" ? "step" : "clgeo.json"}</span>
+              </div>
+            </div>
+            <div className="cad-save-field">
+              <span>Save as type:</span>
+              <select
+                className="cad-save-select"
+                value={saveFileType}
+                onChange={e => setSaveFileType(e.target.value as "step" | "json")}
+              >
+                <option value="step">STEP CAD File (*.step, *.stp)</option>
+                <option value="json">Simwhere Geometry Project (*.clgeo.json)</option>
+              </select>
+            </div>
+            <div className="cad-save-summary">
+              ℹ Ready to export {document.entities.length} sketch/CAD entities across {document.sketches.length} sketch(es) into standard ISO-10303-21 STEP format.
+            </div>
+          </div>
+          <div className="cad-save-footer">
+            <button className="cad-save-btn" onClick={() => setSaveModalOpen(false)}>Cancel</button>
+            <button className="cad-save-btn primary" onClick={handleConfirmSave}>Save</button>
+          </div>
+        </div>
+      </div>
+    )}
   </div>;
 }
 

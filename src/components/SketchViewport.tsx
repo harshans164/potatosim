@@ -263,6 +263,7 @@ export function SketchViewport(props: SketchViewportProps) {
   };
 
   const handleEntityPointerDown = (event: React.PointerEvent, entity: SketchEntity, subIndex?: number) => {
+    if ((event.buttons & 4) !== 0 || event.button === 1) return;
     event.stopPropagation();
     if (event.button !== 0) return;
     const kind = dimensionToolKind(activeTool);
@@ -274,6 +275,7 @@ export function SketchViewport(props: SketchViewportProps) {
   };
 
   const handleDimensionPointerDown = (event: React.PointerEvent, dimension: SketchDimension) => {
+    if ((event.buttons & 4) !== 0 || event.button === 1) return;
     event.stopPropagation();
     props.onSelectDimension(dimension.id);
     if (activeTool === "dimMove" || activeTool === "select") {
@@ -310,9 +312,19 @@ export function SketchViewport(props: SketchViewportProps) {
   const yPt: Point2 = project3DToScreen(0, 0.08, 0, view);
   const zPt: Point2 = project3DToScreen(0, 0, 0.08, view);
 
-  const dirX = normalize(sub(xPt, originPt));
-  const dirY = normalize(sub(yPt, originPt));
-  const dirZ = normalize(sub(zPt, originPt));
+  // Projected axis vectors
+  const lenX = Math.hypot(xPt.x - originPt.x, xPt.y - originPt.y);
+  const lenY = Math.hypot(yPt.x - originPt.x, yPt.y - originPt.y);
+  const lenZ = Math.hypot(zPt.x - originPt.x, zPt.y - originPt.y);
+
+  // An axis is visible in plane/3d if it is not pointing straight into the screen
+  const showX = lenX > 0.8;
+  const showY = lenY > 0.8;
+  const showZ = lenZ > 0.8;
+
+  const dirX = showX ? normalize(sub(xPt, originPt)) : { x: 0, y: 0 };
+  const dirY = showY ? normalize(sub(yPt, originPt)) : { x: 0, y: 0 };
+  const dirZ = showZ ? normalize(sub(zPt, originPt)) : { x: 0, y: 0 };
 
   const coneDist = 76;
   const tipX = add(originPt, mul(dirX, coneDist));
@@ -358,17 +370,17 @@ export function SketchViewport(props: SketchViewportProps) {
 
         {document.display.grid && <rect x={VIEW_BOX.x} y={VIEW_BOX.y} width={VIEW_BOX.width} height={VIEW_BOX.height} fill="url(#sketch-grid)" />}
 
-        {/* Isometric 3D Coordinate Axes Triad matching Screenshot 1 */}
+        {/* Coordinate Axes Triad */}
         <g className="origin-triad-3d" pointerEvents="none">
           {/* Dotted axis lines extending across the viewport */}
-          <line x1={originPt.x - dirY.x * 650} y1={originPt.y - dirY.y * 650} x2={originPt.x + dirY.x * 650} y2={originPt.y + dirY.y * 650} stroke="#1f252d" strokeWidth="1" strokeDasharray="2 3" opacity="0.9" />
-          <line x1={originPt.x - dirX.x * 650} y1={originPt.y - dirX.y * 650} x2={originPt.x + dirX.x * 650} y2={originPt.y + dirX.y * 650} stroke="#1f252d" strokeWidth="1" strokeDasharray="2 3" opacity="0.9" />
-          <line x1={originPt.x - dirZ.x * 650} y1={originPt.y - dirZ.y * 650} x2={originPt.x + dirZ.x * 650} y2={originPt.y + dirZ.y * 650} stroke="#1f252d" strokeWidth="1" strokeDasharray="2 3" opacity="0.9" />
+          {showY && <line x1={originPt.x - dirY.x * 650} y1={originPt.y - dirY.y * 650} x2={originPt.x + dirY.x * 650} y2={originPt.y + dirY.y * 650} stroke="#1f252d" strokeWidth="1" strokeDasharray="2 3" opacity="0.9" />}
+          {showX && <line x1={originPt.x - dirX.x * 650} y1={originPt.y - dirX.y * 650} x2={originPt.x + dirX.x * 650} y2={originPt.y + dirX.y * 650} stroke="#1f252d" strokeWidth="1" strokeDasharray="2 3" opacity="0.9" />}
+          {showZ && <line x1={originPt.x - dirZ.x * 650} y1={originPt.y - dirZ.y * 650} x2={originPt.x + dirZ.x * 650} y2={originPt.y + dirZ.y * 650} stroke="#1f252d" strokeWidth="1" strokeDasharray="2 3" opacity="0.9" />}
 
-          {/* 3D Cones for axes */}
-          <AxisCone tip={tipY} dir={dirY} gradientId="coneGreen" />
-          <AxisCone tip={tipX} dir={dirX} gradientId="coneRed" />
-          <AxisCone tip={tipZ} dir={dirZ} gradientId="coneBlue" />
+          {/* 3D Cones for visible axes */}
+          {showY && <AxisCone tip={tipY} dir={dirY} gradientId="coneGreen" />}
+          {showX && <AxisCone tip={tipX} dir={dirX} gradientId="coneRed" />}
+          {showZ && <AxisCone tip={tipZ} dir={dirZ} gradientId="coneBlue" />}
 
           {/* Center black origin circle */}
           <circle cx={originPt.x} cy={originPt.y} r="3.5" fill="#151b22" />
